@@ -64,6 +64,11 @@ GODOT_PATH="godot"
 PROJECT_PATH="../godot"
 
 # Launch Godot and open the project
-"$GODOT_PATH" --path "$PROJECT_PATH" --editor &
+echo "Launching Godot editor with the project..."
+"$GODOT_PATH" --path "$PROJECT_PATH" --editor
 
-echo "Launched Godot editor with the project"
+echo "Godot editor closed. Cleaning up..."
+
+# Clean up the addons folder
+rm -rf "../godot/addons/godot_asset_browser"
+echo "Cleaned up addons folder"
