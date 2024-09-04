@@ -10,4 +10,4 @@ crate-type = ["cdylib"]
 godot = { git = "https://github.com/godot-rust/gdext", branch = "master" }
 
 [build-dependencies]
-# Add any build dependencies here if needed
+# Add any build dependencies here if neededstyst

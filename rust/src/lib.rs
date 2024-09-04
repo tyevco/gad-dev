@@ -1,5 +1,6 @@
 use godot::prelude::*;
 use godot::classes::{EditorPlugin, IEditorPlugin};
+use godot::private::You_forgot_the_attribute__godot_api;
 
 struct GodotAssetBrowserExtension;
 
@@ -7,27 +8,21 @@ struct GodotAssetBrowserExtension;
 unsafe impl ExtensionLibrary for GodotAssetBrowserExtension {}
 
 #[derive(GodotClass)]
-#[class(base=EditorPlugin, tool)]
+#[class(tool, init, editor_plugin, base=EditorPlugin)]
 struct GABPlugin {
-    base: Base<EditorPlugin>
+    base: Base<EditorPlugin>,
 }
 
-#[godot_api]
-impl GABPlugin {
-    #[func]
-    fn enter_tree(&mut self) {
-        godot_print!("Godot Asset Browser Plugin Activated");
-    }
-
-    #[func]
-    fn exit_tree(&mut self) {
-        godot_print!("Godot Asset Browser Plugin Deactivated");
-    }
-}
 
 #[godot_api]
 impl IEditorPlugin for GABPlugin {
-    fn init(base: Base<EditorPlugin>) -> Self {
-        Self { base }
+    fn enter_tree(&mut self) {
+        // Perform typical plugin operations here.
+        godot_print!("Godot Asset Browser Plugin Activated");
+    }
+
+    fn exit_tree(&mut self) {
+        // Perform typical plugin operations here.
+        godot_print!("Godot Asset Browser Plugin Deactivated");
     }
 }
