@@ -1,27 +1,76 @@
-use godot::classes::Control;
-use crate::asset_library::asset_manager::AssetManager;
 use godot::prelude::*;
 
 pub struct AssetLibraryUI {
-    asset_manager: AssetManager,
+    vbox: Option<VBoxContainer>,
+    asset_list: Option<Tree>,
+    asset_preview: Option<GridContainer>,
 }
 
 impl AssetLibraryUI {
-    pub fn new(asset_manager: AssetManager) -> Self {
-        Self { asset_manager }
+    pub fn new() -> Self {
+        Self {
+            vbox: None,
+            asset_list: None,
+            asset_preview: None,
+        }
+    }
+}
+
+impl Control for AssetLibraryUI {
+    fn _ready(&mut self) {
+        // Create the UI layout
+        self.vbox = Some(VBoxContainer::new());
+        self.add_child(self.vbox.as_ref().unwrap());
+
+        // Create the asset list
+        self.asset_list = Some(Tree::new());
+        self.vbox.as_ref().unwrap().add_child(self.asset_list.as_ref().unwrap());
+
+        // Create the asset preview
+        self.asset_preview = Some(GridContainer::new());
+        self.vbox.as_ref().unwrap().add_child(self.asset_preview.as_ref().unwrap());
+
+        // Configure the asset list
+        self.asset_list.as_ref().unwrap().set_columns(2);
+        self.asset_list.as_ref().unwrap().set_column_titles(vec!["Asset".to_string(), "Type".to_string()]);
+
+        // Connect signals
+        self.asset_list.as_ref().unwrap().connect("item_selected", self, "_on_asset_selected");
     }
 
-    pub fn build_ui(&self) -> Control {
-        // Create a new Control node
-        let control = Control::new_alloc();
+    fn _on_asset_selected(&mut self) {
+        // Get the selected asset
+        let selected_asset = self.asset_list.as_ref().unwrap().get_selected_item();
 
-        // TO DO: implement UI building logic
+        // Update the asset preview
+        self.asset_preview.as_ref().unwrap().clear();
+        if let Some(asset) = selected_asset {
+            // Create a new asset preview node
+            let asset_preview_node = AssetPreviewNode::new(asset);
+            self.asset_preview.as_ref().unwrap().add_child(asset_preview_node);
+        }
+    }
+}
 
-        // Don't forget to free the control when we're done with it
-        // control.free();
+pub struct AssetPreviewNode {
+    asset: String,
+}
 
-        // Or, we can hand over ownership to Godot
-        // control.into_godot();
-        control.into_godot();
+impl AssetPreviewNode {
+    pub fn new(asset: String) -> Self {
+        Self { asset }
+    }
+}
+
+impl Control for AssetPreviewNode {
+    fn _ready(&mut self) {
+        // Create the asset preview UI
+        let vbox = VBoxContainer::new();
+        self.add_child(vbox);
+
+        // Add asset information
+        let label = Label::new();
+        label.set_text(self.asset.clone());
+        vbox.add_child(label);
     }
 }

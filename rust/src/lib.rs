@@ -1,5 +1,6 @@
 mod asset_library;
 mod ui;
+mod asset_library_extension;
 
 use godot::prelude::*;
 use godot::classes::{EditorPlugin, IEditorPlugin};
