@@ -1,3 +1,6 @@
+mod asset_library;
+mod ui;
+
 use godot::prelude::*;
 use godot::classes::{EditorPlugin, IEditorPlugin};
 use godot::private::You_forgot_the_attribute__godot_api;
