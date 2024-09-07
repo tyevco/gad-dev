@@ -1,12 +1,14 @@
+use godot::classes::{GridContainer, IControl, Label, Tree, VBoxContainer};
 use godot::prelude::*;
+use godot::classes::Control;
 
-pub struct AssetLibraryUI {
+pub struct AssetLibraryGUI {
     vbox: Option<VBoxContainer>,
     asset_list: Option<Tree>,
     asset_preview: Option<GridContainer>,
 }
 
-impl AssetLibraryUI {
+impl AssetLibraryGUI {
     pub fn new() -> Self {
         Self {
             vbox: None,
@@ -16,7 +18,8 @@ impl AssetLibraryUI {
     }
 }
 
-impl Control for AssetLibraryUI {
+#[godot_api]
+impl IControl for AssetLibraryGUI {
     fn _ready(&mut self) {
         // Create the UI layout
         self.vbox = Some(VBoxContainer::new());
@@ -62,7 +65,9 @@ impl AssetPreviewNode {
     }
 }
 
-impl Control for AssetPreviewNode {
+
+#[godot_api]
+impl IControl for AssetPreviewNode {
     fn _ready(&mut self) {
         // Create the asset preview UI
         let vbox = VBoxContainer::new();

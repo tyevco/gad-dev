@@ -1,32 +1,20 @@
 mod asset_library;
-mod ui;
+mod gui;
 mod asset_library_extension;
 
 use godot::prelude::*;
+use godot::classes::Control;
 use godot::classes::{EditorPlugin, IEditorPlugin};
-use godot::private::You_forgot_the_attribute__godot_api;
+use crate::asset_library::asset_manager::AssetManager;
+use crate::asset_library::config_manager::ConfigManager;
+use gui::asset_library_ui::AssetLibraryGUI;
 
-struct GodotAssetBrowserExtension;
+struct GodotAssetBrowserExtension
+{
+    ux: Option<AssetLibraryGUI>,
+    asset_manager: Option<AssetManager>,
+    config_manager: Option<ConfigManager>
+}
 
 #[gdextension]
 unsafe impl ExtensionLibrary for GodotAssetBrowserExtension {}
-
-#[derive(GodotClass)]
-#[class(tool, init, editor_plugin, base=EditorPlugin)]
-struct GABPlugin {
-    base: Base<EditorPlugin>,
-}
-
-
-#[godot_api]
-impl IEditorPlugin for GABPlugin {
-    fn enter_tree(&mut self) {
-        // Perform typical plugin operations here.
-        godot_print!("Godot Asset Browser Plugin Activated");
-    }
-
-    fn exit_tree(&mut self) {
-        // Perform typical plugin operations here.
-        godot_print!("Godot Asset Browser Plugin Deactivated");
-    }
-}

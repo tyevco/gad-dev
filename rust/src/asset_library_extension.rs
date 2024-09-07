@@ -1,27 +1,24 @@
+use godot::classes::editor_plugin::DockSlot;
+use godot::classes::{EditorPlugin, IEditorPlugin};
 use godot::prelude::*;
-use asset_manager::AssetManager;
-use config_manager::ConfigManager;
+use asset_library::asset_manager::AssetManager;
+use asset_library::config_manager::ConfigManager;
+use crate::asset_library;
+use crate::gui::asset_library_ui::AssetLibraryGUI;
 
-pub struct AssetLibraryExtension {
-    ui: Option<AssetLibraryUI>,
-    asset_manager: Option<AssetManager>,
-    config_manager: Option<ConfigManager>,
+#[derive(GodotClass)]
+#[class(tool, init, editor_plugin, base=EditorPlugin)]
+struct GABPlugin {
+    base: Base<EditorPlugin>,
 }
 
-impl AssetLibraryExtension {
-    pub fn new() -> Self {
-        Self {
-            ui: None,
-            asset_manager: None,
-            config_manager: None,
-        }
-    }
-}
 
-impl EditorPlugin for AssetLibraryExtension {
+#[godot_api]
+impl IEditorPlugin for GABPlugin {
     fn enter_tree(&mut self) {
+        godot_print!("Godot Asset Browser Plugin Activated");
         // Create the UI and add it to the editor's dock
-        self.ui = Some(AssetLibraryUI::new());
+        self.ui = Some(AssetLibraryGUI::new());
         add_control_to_dock(DockSlot::LeftUl, self.ui.as_ref().unwrap());
 
         // Create the asset manager and config manager
@@ -30,6 +27,7 @@ impl EditorPlugin for AssetLibraryExtension {
     }
 
     fn exit_tree(&mut self) {
+        godot_print!("Godot Asset Browser Plugin Deactivated");
         // Clean up the UI and other components
         if let Some(ui) = self.ui.take() {
             ui.queue_free();

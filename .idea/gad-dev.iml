@@ -6,6 +6,8 @@
       <sourceFolder url="file://$MODULE_DIR$/rust/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/rust/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/rust/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/rust/src" isTestSource="false" />
+      <excludeFolder url="file://$MODULE_DIR$/rust/target" />
       <excludeFolder url="file://$MODULE_DIR$/rust/target" />
       <excludeFolder url="file://$MODULE_DIR$/rust/target" />
       <excludeFolder url="file://$MODULE_DIR$/rust/target" />
