@@ -1,5 +1,7 @@
 use godot::prelude::*;
 
+#[derive(GodotClass)]
+#[class(no_init)]
 pub struct ConfigManager {
     // Add fields for configuration management here
 }

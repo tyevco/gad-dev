@@ -3,6 +3,8 @@ use std::path::Path;
 use godot::prelude::*;
 use reqwest::Client;
 
+#[derive(GodotClass)]
+#[class(no_init)]
 pub struct AssetManager {
     client: Client,
     asset_dir: String,
