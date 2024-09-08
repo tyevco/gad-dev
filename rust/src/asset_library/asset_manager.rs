@@ -19,26 +19,26 @@ impl AssetManager {
     }
 
     pub async fn download_asset(&self, asset_id: String) -> Result<(), String> {
-        let url = format!("https://example.com/assets/{}", asset_id);
-        let response = self.client.get(url).await?;
-        let asset_data = response.bytes().await?;
+    //    let url = format!("https://example.com/assets/{}", asset_id);
+     //   let response = self.client.get(url).await?;
+     //   let asset_data = response.bytes().await?;
 
-        let asset_path = Path::new(&self.asset_dir).join(asset_id);
-        fs::write(asset_path, asset_data)?;
+     //   let asset_path = Path::new(&self.asset_dir).join(asset_id);
+      //  fs::write(asset_path, asset_data)?;
 
         Ok(())
     }
 
     pub async fn import_asset(&self, asset_id: String) -> Result<(), String> {
-        let asset_path = Path::new(&self.asset_dir).join(asset_id);
+     //   let asset_path = Path::new(&self.asset_dir).join(asset_id);
 
-        if !asset_path.exists() {
-            return Err(format!("Asset {} does not exist", asset_id));
-        }
+   //     if !asset_path.exists() {
+  //          return Err(format!("Asset {} does not exist", asset_id));
+   //     }
 
         // Import the asset into the Godot project
-        let asset_importer = AssetImporter::new();
-        asset_importer.import_asset(asset_path)?;
+       // let asset_importer = AssetImporter::new();
+       // asset_importer.import_asset(asset_path)?;
 
         Ok(())
     }

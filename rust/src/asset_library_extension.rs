@@ -1,5 +1,6 @@
 use godot::classes::editor_plugin::DockSlot;
 use godot::classes::{EditorPlugin, IEditorPlugin};
+use godot::obj::AsObjectArg;
 use godot::prelude::*;
 use asset_library::asset_manager::AssetManager;
 use asset_library::config_manager::ConfigManager;
@@ -25,8 +26,8 @@ impl IEditorPlugin for GABPlugin {
     fn make_visible(&mut self, visible: bool) {
         // Show the UI
         if visible {
-            if let Some(ui) = self.gui.as_mut() {
-                ui.show();
+            if let Some(gui) = self.gui.as_mut() {
+                gui.show();
             }
         }
     }
@@ -34,9 +35,9 @@ impl IEditorPlugin for GABPlugin {
     fn enter_tree(&mut self) {
         godot_print!("Godot Asset Browser Plugin Activated");
         // Create the UI and add it to the editor's dock
-        self.gui = Some(AssetLibraryGUI::new_alloc());
-        self.base_mut().add_control_to_dock(DockSlot::LEFT_UL, self.gui.as_mut().unwrap());
-
+        let mut gui = AssetLibraryGUI::new_alloc();
+        self.base_mut().add_control_to_dock(DockSlot::LEFT_UL, gui.clone());
+        self.gui = Some(gui);
         // Create the asset manager and config manager
         //self.asset_manager = Some(AssetManager::new());
         //self.config_manager = Some(ConfigManager::new());
@@ -45,8 +46,8 @@ impl IEditorPlugin for GABPlugin {
     fn exit_tree(&mut self) {
         godot_print!("Godot Asset Browser Plugin Deactivated");
         // Clean up the UI and other components
-        if let Some(gui) = self.gui.take() {
-            gui.queue_free();
+        if let Some(mut gui) = self.gui.take() {
+            // gui.queue_free();
         }
         if let Some(asset_manager) = self.asset_manager.take() {
             drop(asset_manager);
