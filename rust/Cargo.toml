@@ -8,7 +8,7 @@ crate-type = ["cdylib"]
 
 [dependencies]
 godot = { git = "https://github.com/godot-rust/gdext", branch = "master" }
-reqwest = "0.12.7"
+reqwest = { version = "0.12.7", features = ["json"] }
 
 [build-dependencies]
-# Add any build dependencies here if neededstyst
+# Add any build dependencies here if needed

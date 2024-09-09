@@ -1,9 +1,10 @@
+use godot::classes::{Control, GridContainer, IControl, Label, Tree, VBoxContainer};
 use godot::prelude::*;
-use godot::classes::{Control, VBoxContainer, Tree, GridContainer, Label, IControl};
 
 #[derive(GodotClass)]
 #[class(tool, base=Control)]
 pub struct AssetLibraryGUI {
+    #[base]
     base: Base<Control>,
     vbox: Option<Gd<VBoxContainer>>,
     asset_list: Option<Gd<Tree>>,
@@ -14,17 +15,13 @@ pub struct AssetLibraryGUI {
 impl AssetLibraryGUI {
     #[func]
     fn on_asset_selected(&mut self) {
-        // Get the selected asset
         if let Some(list) = &self.asset_list {
             let selected_item = list.get_selected();
 
-            // Update the asset preview
             if let Some(mut preview) = self.asset_preview.clone() {
-                let mut children = preview.get_children();
-                children.clear();
+                let children = preview.get_children();
 
                 if let Some(item) = selected_item {
-                    // Create a new asset preview node
                     let asset_name = item.get_text(0);
                     let asset_preview_node = AssetPreviewNode::new_with_asset(asset_name.to_string());
                     preview.add_child(asset_preview_node);
@@ -46,22 +43,17 @@ impl IControl for AssetLibraryGUI {
     }
 
     fn ready(&mut self) {
-        // Create the UI layout
         let mut vbox = VBoxContainer::new_alloc();
 
-        // Create the asset list
         let mut asset_list = Tree::new_alloc();
-
-        // Configure the asset list
         asset_list.set_columns(2);
         asset_list.set_column_title(0, "Asset".into());
         asset_list.set_column_title(1, "Type".into());
-        asset_list.connect("item_selected".into(), self.base_mut().callable("on_asset_selected"));
+        asset_list.connect("item_selected".into(), self.base().callable("on_asset_selected"));
 
         vbox.add_child(asset_list.clone());
         self.asset_list = Some(asset_list);
 
-        // Create the asset preview
         let asset_preview = GridContainer::new_alloc();
         vbox.add_child(asset_preview.clone());
         self.asset_preview = Some(asset_preview);
@@ -71,10 +63,10 @@ impl IControl for AssetLibraryGUI {
     }
 }
 
-
 #[derive(GodotClass)]
 #[class(base=Control)]
 pub struct AssetPreviewNode {
+    #[base]
     base: Base<Control>,
     asset: String,
 }
@@ -89,10 +81,8 @@ impl IControl for AssetPreviewNode {
     }
 
     fn ready(&mut self) {
-        // Create the asset preview UI
         let mut vbox = VBoxContainer::new_alloc();
 
-        // Add asset information
         let mut label = Label::new_alloc();
         label.set_text(self.asset.clone().into());
         vbox.add_child(label);

@@ -1,7 +1,4 @@
 use godot::prelude::*;
-use godot::classes::{EditorPlugin, IEditorPlugin};
-use godot::classes::editor_plugin::DockSlot;
-use crate::gui::asset_library_ui::AssetLibraryGUI;
 
 mod asset_library;
 mod gui;
