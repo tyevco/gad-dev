@@ -15,6 +15,7 @@ pub struct AssetLibraryGUI {
 impl AssetLibraryGUI {
     #[func]
     fn on_asset_selected(&mut self) {
+        godot_print!("Godot Asset selected");
         if let Some(list) = &self.asset_list {
             let selected_item = list.get_selected();
 
@@ -23,7 +24,8 @@ impl AssetLibraryGUI {
 
                 if let Some(item) = selected_item {
                     let asset_name = item.get_text(0);
-                    let asset_preview_node = AssetPreviewNode::new_with_asset(asset_name.to_string());
+                    let asset_preview_node =
+                        AssetPreviewNode::new_with_asset(asset_name.to_string());
                     preview.add_child(asset_preview_node);
                 }
             }
@@ -36,12 +38,17 @@ impl IControl for AssetLibraryGUI {
     fn ready(&mut self) {
         let mut vbox = VBoxContainer::new_alloc();
 
+        self.base_mut().set_name("GAB".into());
+
         let mut asset_list = Tree::new_alloc();
         asset_list.set_columns(2);
         asset_list.set_column_title(0, "Asset".into());
         asset_list.set_column_title(1, "Type".into());
-        asset_list.connect("item_selected".into(), self.base().callable("on_asset_selected"));
-
+        asset_list.connect(
+            "item_selected".into(),
+            self.base().callable("on_asset_selected"),
+        );
+        vbox.set_name("GAB".into());
         vbox.add_child(asset_list.clone());
         self.asset_list = Some(asset_list);
 
