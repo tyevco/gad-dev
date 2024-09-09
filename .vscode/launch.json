@@ -3,7 +3,7 @@
         
         {
             "name": "Debug Project (Godot 4)",
-            "type": "lldb", // type provided by CodeLLDB extension
+            "type": "cppvsdbg", // type provided by CodeLLDB extension
             "request": "launch",
             "preLaunchTask": "cargo build",
             "cwd": "${workspaceFolder}",
@@ -16,7 +16,7 @@
                 "program": "/usr/local/bin/godot",
             },
             "windows": {
-                "program": "C:\\Program Files\\Godot\\Godot_v4.1.X.exe",
+                "program": "C:/Users/Tyler Coles/AppData/Roaming/godotenv/godot/bin/godot.exe",
             },
             "osx": {
                 // NOTE: on macOS the Godot.app needs to be manually re-signed 

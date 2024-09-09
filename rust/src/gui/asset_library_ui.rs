@@ -2,7 +2,7 @@ use godot::classes::{Control, GridContainer, IControl, Label, Tree, VBoxContaine
 use godot::prelude::*;
 
 #[derive(GodotClass)]
-#[class(tool, base=Control)]
+#[class(tool, init, base=Control)]
 pub struct AssetLibraryGUI {
     #[base]
     base: Base<Control>,
@@ -33,15 +33,6 @@ impl AssetLibraryGUI {
 
 #[godot_api]
 impl IControl for AssetLibraryGUI {
-    fn init(base: Base<Control>) -> Self {
-        Self {
-            base,
-            vbox: None,
-            asset_list: None,
-            asset_preview: None,
-        }
-    }
-
     fn ready(&mut self) {
         let mut vbox = VBoxContainer::new_alloc();
 
