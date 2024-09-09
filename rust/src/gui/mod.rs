@@ -1,1 +1,4 @@
-pub mod asset_library_ui;
+mod asset_library_gui;
+
+
+pub use asset_library_gui::AssetLibraryGUI;

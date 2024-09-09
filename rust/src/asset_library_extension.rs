@@ -1,7 +1,6 @@
-use crate::asset_library::asset_manager::AssetManager;
-use crate::asset_library::config_manager::ConfigManager;
-use crate::gui::asset_library_ui::AssetLibraryGUI;
-use godot::classes::editor_plugin::DockSlot;
+use crate::asset_library::AssetManager;
+use crate::asset_library::ConfigManager;
+use crate::gui::AssetLibraryGUI;
 use godot::classes::{EditorInterface, EditorPlugin, IEditorPlugin};
 use godot::prelude::*;
 
