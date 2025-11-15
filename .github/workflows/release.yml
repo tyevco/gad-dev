@@ -1,0 +1,207 @@
+name: Release Build
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version (e.g., v0.1.0)'
+        required: true
+        type: string
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  create-release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    outputs:
+      upload_url: ${{ steps.create_release.outputs.upload_url }}
+      version: ${{ steps.get_version.outputs.version }}
+
+    steps:
+    - name: Get version from tag
+      id: get_version
+      run: |
+        if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+          echo "version=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
+        else
+          echo "version=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Create Release
+      id: create_release
+      uses: actions/create-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: ${{ steps.get_version.outputs.version }}
+        release_name: Godot Asset Browser ${{ steps.get_version.outputs.version }}
+        draft: true
+        prerelease: false
+        body: |
+          ## Godot Asset Browser ${{ steps.get_version.outputs.version }}
+
+          ### Installation
+          1. Download the appropriate file for your platform
+          2. Extract the archive
+          3. Copy the `addons/godot_asset_browser` folder to your Godot project
+          4. Enable the plugin in Project Settings → Plugins
+
+          ### Changelog
+          See [CHANGELOG.md](https://github.com/${{ github.repository }}/blob/main/CHANGELOG.md) for details.
+
+          ### Platform-specific Notes
+          - **Linux**: Requires libssl and libcrypto (usually pre-installed)
+          - **Windows**: No additional dependencies
+          - **macOS**: May require security approval on first run
+
+  build:
+    name: Build ${{ matrix.platform }}
+    needs: create-release
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux-x64
+            os: ubuntu-latest
+            rust-target: x86_64-unknown-linux-gnu
+            artifact-name: godot-asset-browser-linux-x64
+            lib-extension: so
+
+          - platform: windows-x64
+            os: windows-latest
+            rust-target: x86_64-pc-windows-msvc
+            artifact-name: godot-asset-browser-windows-x64
+            lib-extension: dll
+
+          - platform: macos-universal
+            os: macos-latest
+            rust-target: x86_64-apple-darwin
+            artifact-name: godot-asset-browser-macos-universal
+            lib-extension: dylib
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        submodules: recursive
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        targets: ${{ matrix.rust-target }}
+
+    - name: Install Linux dependencies
+      if: runner.os == 'Linux'
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y libssl-dev pkg-config
+
+    - name: Cache cargo build
+      uses: actions/cache@v4
+      with:
+        path: rust/target
+        key: ${{ runner.os }}-release-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-release-
+
+    - name: Build release binary
+      working-directory: ./rust
+      run: cargo build --release --target ${{ matrix.rust-target }}
+
+    - name: Prepare addon directory (Linux/macOS)
+      if: runner.os != 'Windows'
+      run: |
+        mkdir -p release/addons/godot_asset_browser/bin
+        cp -r gdscript/* release/addons/godot_asset_browser/
+        cp rust/target/${{ matrix.rust-target }}/release/libgodot_asset_browser.${{ matrix.lib-extension }} \
+           release/addons/godot_asset_browser/bin/libgodot_asset_browser.${{ matrix.lib-extension }}
+
+    - name: Prepare addon directory (Windows)
+      if: runner.os == 'Windows'
+      shell: pwsh
+      run: |
+        New-Item -ItemType Directory -Force -Path release/addons/godot_asset_browser/bin
+        Copy-Item -Recurse -Force gdscript/* release/addons/godot_asset_browser/
+        Copy-Item rust/target/${{ matrix.rust-target }}/release/godot_asset_browser.${{ matrix.lib-extension }} `
+                  release/addons/godot_asset_browser/bin/libgodot_asset_browser.${{ matrix.lib-extension }}
+
+    - name: Copy documentation
+      if: runner.os != 'Windows'
+      run: |
+        cp README.md release/
+        cp LICENSE release/
+        cp CHANGELOG.md release/ 2>/dev/null || echo "No CHANGELOG.md found"
+        cp USER_GUIDE.md release/ 2>/dev/null || echo "No USER_GUIDE.md found"
+
+    - name: Copy documentation (Windows)
+      if: runner.os == 'Windows'
+      shell: pwsh
+      run: |
+        Copy-Item README.md release/
+        Copy-Item LICENSE release/
+        if (Test-Path CHANGELOG.md) { Copy-Item CHANGELOG.md release/ }
+        if (Test-Path USER_GUIDE.md) { Copy-Item USER_GUIDE.md release/ }
+
+    - name: Create release archive (Linux/macOS)
+      if: runner.os != 'Windows'
+      run: |
+        cd release
+        tar -czf ../${{ matrix.artifact-name }}.tar.gz *
+        cd ..
+
+    - name: Create release archive (Windows)
+      if: runner.os == 'Windows'
+      shell: pwsh
+      run: |
+        Compress-Archive -Path release/* -DestinationPath ${{ matrix.artifact-name }}.zip
+
+    - name: Upload release asset (Linux/macOS)
+      if: runner.os != 'Windows'
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ needs.create-release.outputs.upload_url }}
+        asset_path: ./${{ matrix.artifact-name }}.tar.gz
+        asset_name: ${{ matrix.artifact-name }}.tar.gz
+        asset_content_type: application/gzip
+
+    - name: Upload release asset (Windows)
+      if: runner.os == 'Windows'
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ needs.create-release.outputs.upload_url }}
+        asset_path: ./${{ matrix.artifact-name }}.zip
+        asset_name: ${{ matrix.artifact-name }}.zip
+        asset_content_type: application/zip
+
+  publish-asset-library:
+    name: Publish to Godot Asset Library
+    needs: [create-release, build]
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Prepare Asset Library submission
+      run: |
+        echo "Asset Library submission would be triggered here"
+        echo "This requires manual approval and asset library credentials"
+        echo "See: https://godotengine.org/asset-library/asset"
+
+    - name: Create submission reminder
+      run: |
+        echo "::notice::Remember to manually submit to Godot Asset Library"
+        echo "::notice::Version: ${{ needs.create-release.outputs.version }}"
+        echo "::notice::Download URL: https://github.com/${{ github.repository }}/releases/download/${{ needs.create-release.outputs.version }}/godot-asset-browser-linux-x64.tar.gz"

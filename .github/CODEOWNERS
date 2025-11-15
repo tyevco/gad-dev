@@ -1,0 +1,19 @@
+# Code Owners
+#
+# These owners will be the default reviewers for pull requests
+
+# Default owner for everything in the repo
+* @tyevco
+
+# Rust codebase
+/rust/ @tyevco
+
+# CI/CD workflows
+/.github/workflows/ @tyevco
+
+# Documentation
+*.md @tyevco
+/docs/ @tyevco
+
+# GDScript
+/gdscript/ @tyevco
