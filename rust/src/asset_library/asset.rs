@@ -233,6 +233,12 @@ impl Default for AssetCategory {
     }
 }
 
+impl std::fmt::Display for AssetCategory {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.display_name())
+    }
+}
+
 /// Represents a dependency on another asset
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct AssetDependency {
