@@ -13,16 +13,25 @@ use crate::asset_library::asset::{Asset, AssetCategory};
 pub struct AssetManager {
     client: Client,
     asset_dir: String,
+    cache_dir: String,
     assets: Arc<Mutex<Vec<Asset>>>,
+    installed_assets: Arc<Mutex<Vec<String>>>, // Track installed asset IDs
 }
 
 impl AssetManager {
     pub fn new() -> Self {
         let mut manager = Self {
             client: Client::new(),
-            asset_dir: "res://assets/".to_string(),
+            asset_dir: "res://addons/".to_string(),
+            cache_dir: "user://asset_cache/".to_string(),
             assets: Arc::new(Mutex::new(Vec::new())),
+            installed_assets: Arc::new(Mutex::new(Vec::new())),
         };
+
+        // Ensure cache directory exists
+        if let Err(e) = fs::create_dir_all(&manager.cache_dir) {
+            godot_print!("Warning: Failed to create cache directory: {}", e);
+        }
 
         // Initialize with sample data for testing
         manager.initialize_sample_assets();
@@ -152,14 +161,468 @@ impl AssetManager {
             .cloned()
     }
 
-    pub async fn download_asset(&self, asset_id: String) -> Result<(), String> {
-        // Implementation commented out for now
+    /// Downloads an asset from its URL to the cache directory
+    ///
+    /// # Arguments
+    /// * `asset_id` - The ID of the asset to download
+    ///
+    /// # Returns
+    /// * `Ok(PathBuf)` - Path to the downloaded file on success
+    /// * `Err(String)` - Error message on failure
+    pub async fn download_asset(&self, asset_id: String) -> Result<PathBuf, String> {
+        // Get the asset details
+        let asset = self.get_asset_by_id(&asset_id)
+            .ok_or_else(|| format!("Asset with ID '{}' not found", asset_id))?;
+
+        godot_print!("Starting download for asset: {} ({})", asset.name, asset_id);
+
+        // Determine the file extension from the URL
+        let url = &asset.download_url;
+        let file_ext = Self::extract_file_extension(url).unwrap_or("zip".to_string());
+        let cache_file_name = format!("{}_{}.{}", asset_id, asset.version, file_ext);
+        let cache_file_path = PathBuf::from(&self.cache_dir).join(&cache_file_name);
+
+        // Check if file already exists in cache
+        if cache_file_path.exists() {
+            godot_print!("Asset already cached at: {:?}", cache_file_path);
+            return Ok(cache_file_path);
+        }
+
+        // Create cache directory if it doesn't exist
+        if let Some(parent) = cache_file_path.parent() {
+            fs::create_dir_all(parent)
+                .map_err(|e| format!("Failed to create cache directory: {}", e))?;
+        }
+
+        // Download the file
+        godot_print!("Downloading from: {}", url);
+        let response = self.client
+            .get(url)
+            .send()
+            .await
+            .map_err(|e| format!("Failed to initiate download: {}", e))?;
+
+        if !response.status().is_success() {
+            return Err(format!("Download failed with status: {}", response.status()));
+        }
+
+        // Get total size for progress tracking
+        let total_size = response.content_length().unwrap_or(0);
+        godot_print!("Download size: {} bytes", total_size);
+
+        // Download the content
+        let content = response.bytes()
+            .await
+            .map_err(|e| format!("Failed to download content: {}", e))?;
+
+        // Write to cache file
+        fs::write(&cache_file_path, &content)
+            .map_err(|e| format!("Failed to write cache file: {}", e))?;
+
+        godot_print!("Download complete: {:?}", cache_file_path);
+        Ok(cache_file_path)
+    }
+
+    /// Extracts file extension from a URL
+    fn extract_file_extension(url: &str) -> Option<String> {
+        let path = url.split('?').next()?; // Remove query parameters
+        let filename = path.split('/').last()?;
+
+        if filename.ends_with(".tar.gz") {
+            return Some("tar.gz".to_string());
+        }
+
+        filename.split('.').last().map(|s| s.to_string())
+    }
+
+    /// Imports an asset by downloading and extracting it
+    ///
+    /// This method performs the complete import process:
+    /// 1. Downloads the asset to cache (or uses cached version)
+    /// 2. Extracts the archive to the asset directory
+    /// 3. Validates the extracted content
+    /// 4. Integrates with Godot's import system
+    /// 5. Tracks the asset as installed
+    ///
+    /// # Arguments
+    /// * `asset_id` - The ID of the asset to import
+    ///
+    /// # Returns
+    /// * `Ok(())` - Success
+    /// * `Err(String)` - Error message on failure
+    pub async fn import_asset(&self, asset_id: String) -> Result<PathBuf, String> {
+        godot_print!("Starting import for asset: {}", asset_id);
+
+        // Step 1: Download the asset
+        let cache_file_path = self.download_asset(asset_id.clone()).await?;
+
+        // Step 2: Create importer and extract
+        let importer = AssetImporter::new(PathBuf::from(&self.asset_dir));
+        let final_path = importer.import_asset(&cache_file_path, &asset_id)
+            .map_err(|e| {
+                godot_print!("Import failed: {}", e);
+                e
+            })?;
+
+        // Step 3: Track as installed
+        {
+            let mut installed = self.installed_assets.lock().unwrap();
+            if !installed.contains(&asset_id) {
+                installed.push(asset_id.clone());
+            }
+        }
+
+        godot_print!("Successfully imported asset '{}' to: {:?}", asset_id, final_path);
+        Ok(final_path)
+    }
+
+    /// Checks if an asset is currently installed
+    pub fn is_asset_installed(&self, asset_id: &str) -> bool {
+        self.installed_assets.lock().unwrap().contains(&asset_id.to_string())
+    }
+
+    /// Gets a list of all installed asset IDs
+    pub fn get_installed_assets(&self) -> Vec<String> {
+        self.installed_assets.lock().unwrap().clone()
+    }
+
+    /// Uninstalls an asset by removing it from the asset directory
+    pub fn uninstall_asset(&self, asset_id: &str) -> Result<(), String> {
+        let asset_path = PathBuf::from(&self.asset_dir).join(asset_id);
+
+        if !asset_path.exists() {
+            return Err(format!("Asset '{}' is not installed", asset_id));
+        }
+
+        fs::remove_dir_all(&asset_path)
+            .map_err(|e| format!("Failed to uninstall asset: {}", e))?;
+
+        // Remove from installed list
+        {
+            let mut installed = self.installed_assets.lock().unwrap();
+            installed.retain(|id| id != asset_id);
+        }
+
+        godot_print!("Successfully uninstalled asset: {}", asset_id);
         Ok(())
     }
 
-    pub async fn import_asset(&self, asset_id: String) -> Result<(), String> {
-        // Implementation commented out for now
+    /// Fetches asset metadata from a remote source
+    ///
+    /// This method retrieves asset information from a remote API endpoint.
+    /// In a full implementation, this would connect to the Godot Asset Library API
+    /// or other configured asset sources.
+    ///
+    /// # Arguments
+    /// * `source_url` - The URL of the asset source API
+    ///
+    /// # Returns
+    /// * `Ok(Vec<Asset>)` - List of assets from the source
+    /// * `Err(String)` - Error message on failure
+    pub async fn fetch_assets_from_source(&self, source_url: &str) -> Result<Vec<Asset>, String> {
+        godot_print!("Fetching assets from: {}", source_url);
+
+        let response = self.client
+            .get(source_url)
+            .send()
+            .await
+            .map_err(|e| format!("Failed to fetch assets: {}", e))?;
+
+        if !response.status().is_success() {
+            return Err(format!("API request failed with status: {}", response.status()));
+        }
+
+        // Parse the response as JSON
+        let assets: Vec<Asset> = response.json()
+            .await
+            .map_err(|e| format!("Failed to parse asset metadata: {}", e))?;
+
+        godot_print!("Fetched {} assets from remote source", assets.len());
+        Ok(assets)
+    }
+
+    /// Fetches detailed metadata for a specific asset
+    ///
+    /// # Arguments
+    /// * `source_url` - The URL of the asset detail endpoint
+    ///
+    /// # Returns
+    /// * `Ok(Asset)` - The asset with full metadata
+    /// * `Err(String)` - Error message on failure
+    pub async fn fetch_asset_details(&self, source_url: &str) -> Result<Asset, String> {
+        godot_print!("Fetching asset details from: {}", source_url);
+
+        let response = self.client
+            .get(source_url)
+            .send()
+            .await
+            .map_err(|e| format!("Failed to fetch asset details: {}", e))?;
+
+        if !response.status().is_success() {
+            return Err(format!("API request failed with status: {}", response.status()));
+        }
+
+        // Parse the response as JSON
+        let asset: Asset = response.json()
+            .await
+            .map_err(|e| format!("Failed to parse asset metadata: {}", e))?;
+
+        Ok(asset)
+    }
+
+    /// Refreshes the local asset list with data from remote sources
+    ///
+    /// This method updates the internal asset list with fresh data from
+    /// configured remote sources. In a full implementation, this would query
+    /// multiple asset sources and merge the results.
+    ///
+    /// # Arguments
+    /// * `source_urls` - List of asset source URLs to query
+    ///
+    /// # Returns
+    /// * `Ok(usize)` - Number of assets fetched
+    /// * `Err(String)` - Error message on failure
+    pub async fn refresh_asset_list(&self, source_urls: Vec<String>) -> Result<usize, String> {
+        godot_print!("Refreshing asset list from {} sources", source_urls.len());
+
+        let mut all_assets = Vec::new();
+
+        for source_url in source_urls {
+            match self.fetch_assets_from_source(&source_url).await {
+                Ok(mut assets) => {
+                    godot_print!("Fetched {} assets from {}", assets.len(), source_url);
+                    all_assets.append(&mut assets);
+                }
+                Err(e) => {
+                    godot_print!("Warning: Failed to fetch from {}: {}", source_url, e);
+                    // Continue with other sources even if one fails
+                }
+            }
+        }
+
+        // Update the internal asset list
+        {
+            let mut assets = self.assets.lock().unwrap();
+            *assets = all_assets;
+        }
+
+        let count = self.assets.lock().unwrap().len();
+        godot_print!("Asset list refreshed with {} total assets", count);
+        Ok(count)
+    }
+
+    /// Clears the download cache
+    ///
+    /// Removes all cached asset files to free up disk space
+    pub fn clear_cache(&self) -> Result<(), String> {
+        let cache_path = PathBuf::from(&self.cache_dir);
+
+        if !cache_path.exists() {
+            return Ok(()); // Nothing to clear
+        }
+
+        // Remove all files in cache directory
+        let entries = fs::read_dir(&cache_path)
+            .map_err(|e| format!("Failed to read cache directory: {}", e))?;
+
+        let mut cleared_count = 0;
+        for entry in entries.flatten() {
+            if let Ok(file_type) = entry.file_type() {
+                if file_type.is_file() {
+                    if fs::remove_file(entry.path()).is_ok() {
+                        cleared_count += 1;
+                    }
+                }
+            }
+        }
+
+        godot_print!("Cleared {} cached files", cleared_count);
         Ok(())
+    }
+
+    /// Gets the size of the cache directory in bytes
+    pub fn get_cache_size(&self) -> Result<u64, String> {
+        let cache_path = PathBuf::from(&self.cache_dir);
+
+        if !cache_path.exists() {
+            return Ok(0);
+        }
+
+        let mut total_size = 0u64;
+        let entries = fs::read_dir(&cache_path)
+            .map_err(|e| format!("Failed to read cache directory: {}", e))?;
+
+        for entry in entries.flatten() {
+            if let Ok(metadata) = entry.metadata() {
+                if metadata.is_file() {
+                    total_size += metadata.len();
+                }
+            }
+        }
+
+        Ok(total_size)
+    }
+
+    /// Checks if an update is available for a specific asset
+    ///
+    /// Compares the installed version with the version in the asset list
+    ///
+    /// # Arguments
+    /// * `asset_id` - The ID of the asset to check
+    ///
+    /// # Returns
+    /// * `Ok(Some(Asset))` - Update is available, returns the newer asset
+    /// * `Ok(None)` - No update available or asset not installed
+    /// * `Err(String)` - Error checking for updates
+    pub fn check_for_update(&self, asset_id: &str) -> Result<Option<Asset>, String> {
+        // Check if asset is installed
+        if !self.is_asset_installed(asset_id) {
+            return Ok(None);
+        }
+
+        // Get the current asset metadata
+        let current_asset = self.get_asset_by_id(asset_id)
+            .ok_or_else(|| format!("Asset '{}' not found in catalog", asset_id))?;
+
+        // Get installed version from metadata file
+        let asset_path = PathBuf::from(&self.asset_dir).join(asset_id);
+        let metadata_path = asset_path.join(ASSET_METADATA_FILE);
+
+        let installed_version = if metadata_path.exists() {
+            // Read installed version from metadata
+            match fs::read_to_string(&metadata_path) {
+                Ok(content) => {
+                    if let Ok(metadata) = serde_json::from_str::<serde_json::Value>(&content) {
+                        metadata.get("version")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or(&current_asset.version)
+                            .to_string()
+                    } else {
+                        current_asset.version.clone()
+                    }
+                }
+                Err(_) => current_asset.version.clone()
+            }
+        } else {
+            // No metadata file, assume current version
+            current_asset.version.clone()
+        };
+
+        // Compare versions
+        if Self::is_version_newer(&current_asset.version, &installed_version) {
+            godot_print!("Update available for '{}': {} -> {}",
+                asset_id, installed_version, current_asset.version);
+            Ok(Some(current_asset))
+        } else {
+            Ok(None)
+        }
+    }
+
+    /// Checks for updates for all installed assets
+    ///
+    /// # Returns
+    /// * `Ok(Vec<Asset>)` - List of assets with available updates
+    /// * `Err(String)` - Error checking for updates
+    pub fn check_all_for_updates(&self) -> Result<Vec<Asset>, String> {
+        let installed = self.get_installed_assets();
+        let mut updates = Vec::new();
+
+        for asset_id in installed {
+            if let Ok(Some(updated_asset)) = self.check_for_update(&asset_id) {
+                updates.push(updated_asset);
+            }
+        }
+
+        if !updates.is_empty() {
+            godot_print!("Found {} available updates", updates.len());
+        }
+
+        Ok(updates)
+    }
+
+    /// Compares two version strings to determine if one is newer
+    ///
+    /// This is a simple semantic version comparison (major.minor.patch)
+    ///
+    /// # Arguments
+    /// * `version_a` - First version to compare
+    /// * `version_b` - Second version to compare
+    ///
+    /// # Returns
+    /// * `true` if version_a is newer than version_b
+    /// * `false` otherwise
+    fn is_version_newer(version_a: &str, version_b: &str) -> bool {
+        let parse_version = |v: &str| -> Vec<u32> {
+            v.split('.')
+                .filter_map(|s| s.parse::<u32>().ok())
+                .collect()
+        };
+
+        let a_parts = parse_version(version_a);
+        let b_parts = parse_version(version_b);
+
+        // Compare each part
+        for i in 0..a_parts.len().max(b_parts.len()) {
+            let a = a_parts.get(i).unwrap_or(&0);
+            let b = b_parts.get(i).unwrap_or(&0);
+
+            if a > b {
+                return true;
+            } else if a < b {
+                return false;
+            }
+        }
+
+        false // Versions are equal
+    }
+
+    /// Updates an installed asset to the latest version
+    ///
+    /// This method downloads and installs the new version, replacing the old one
+    ///
+    /// # Arguments
+    /// * `asset_id` - The ID of the asset to update
+    ///
+    /// # Returns
+    /// * `Ok(PathBuf)` - Path to the updated asset
+    /// * `Err(String)` - Error message on failure
+    pub async fn update_asset(&self, asset_id: String) -> Result<PathBuf, String> {
+        godot_print!("Updating asset: {}", asset_id);
+
+        // Check if update is available
+        match self.check_for_update(&asset_id)? {
+            Some(updated_asset) => {
+                godot_print!("Updating to version {}", updated_asset.version);
+
+                // Uninstall old version
+                self.uninstall_asset(&asset_id)?;
+
+                // Install new version
+                self.import_asset(asset_id).await
+            }
+            None => {
+                Err(format!("No update available for asset '{}'", asset_id))
+            }
+        }
+    }
+
+    /// Adds an asset to the local catalog
+    ///
+    /// This is useful for adding custom assets or updating asset metadata
+    pub fn add_asset(&self, asset: Asset) {
+        let mut assets = self.assets.lock().unwrap();
+
+        // Remove existing asset with same ID if present
+        assets.retain(|a| a.id != asset.id);
+
+        // Add the new/updated asset
+        assets.push(asset);
+    }
+
+    /// Removes an asset from the local catalog
+    pub fn remove_asset(&self, asset_id: &str) {
+        let mut assets = self.assets.lock().unwrap();
+        assets.retain(|a| a.id != asset_id);
     }
 }
 
