@@ -2768,4 +2768,183 @@ mod tests {
         assert_eq!(result.errors.len(), 2);
         assert_eq!(result.warnings.len(), 1);
     }
+
+    // ==================== Cross-Platform Compatibility Tests ====================
+
+    #[test]
+    fn test_path_join_cross_platform() {
+        // Verify PathBuf::join creates correct paths on all platforms
+        let base = PathBuf::from("assets");
+        let sub = base.join("test_asset");
+        let file = sub.join("asset.json");
+
+        // Path should be constructed correctly regardless of platform
+        assert!(file.to_string_lossy().contains("assets"));
+        assert!(file.to_string_lossy().contains("test_asset"));
+        assert!(file.to_string_lossy().contains("asset.json"));
+
+        // Verify no hardcoded separators are needed
+        assert_eq!(file, PathBuf::from("assets").join("test_asset").join("asset.json"));
+    }
+
+    #[test]
+    fn test_path_components_platform_agnostic() {
+        // Verify path components work correctly
+        let path = PathBuf::from("base").join("sub1").join("sub2").join("file.txt");
+
+        let components: Vec<_> = path.components()
+            .map(|c| c.as_os_str().to_string_lossy().to_string())
+            .collect();
+
+        assert_eq!(components.len(), 4);
+        assert_eq!(components[0], "base");
+        assert_eq!(components[1], "sub1");
+        assert_eq!(components[2], "sub2");
+        assert_eq!(components[3], "file.txt");
+    }
+
+    #[test]
+    fn test_temp_dir_creation_cross_platform() {
+        use tempfile::TempDir;
+
+        // Verify temporary directory creation works on all platforms
+        let temp_dir = TempDir::new().unwrap();
+        let temp_path = temp_dir.path();
+
+        assert!(temp_path.exists());
+        assert!(temp_path.is_dir());
+
+        // Can create subdirectories
+        let sub_path = temp_path.join("subdir");
+        fs::create_dir_all(&sub_path).unwrap();
+        assert!(sub_path.exists());
+
+        // Can create files
+        let file_path = sub_path.join("test.txt");
+        fs::write(&file_path, "test content").unwrap();
+        assert!(file_path.exists());
+
+        let content = fs::read_to_string(&file_path).unwrap();
+        assert_eq!(content, "test content");
+    }
+
+    #[test]
+    fn test_file_extension_handling() {
+        // Verify file extension detection works correctly
+        let zip_path = PathBuf::from("archive.zip");
+        assert_eq!(zip_path.extension().unwrap(), "zip");
+
+        let tar_gz_path = PathBuf::from("archive.tar.gz");
+        assert_eq!(tar_gz_path.extension().unwrap(), "gz");
+
+        let no_ext = PathBuf::from("file");
+        assert!(no_ext.extension().is_none());
+    }
+
+    #[test]
+    fn test_path_parent_directory() {
+        // Verify parent directory detection
+        let file_path = PathBuf::from("dir1").join("dir2").join("file.txt");
+        let parent = file_path.parent().unwrap();
+
+        assert_eq!(parent, PathBuf::from("dir1").join("dir2"));
+
+        let grandparent = parent.parent().unwrap();
+        assert_eq!(grandparent, PathBuf::from("dir1"));
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn test_unix_specific_permissions() {
+        use tempfile::TempDir;
+        use std::os::unix::fs::PermissionsExt;
+
+        // Test Unix-specific file permission handling
+        let temp_dir = TempDir::new().unwrap();
+        let file_path = temp_dir.path().join("test.sh");
+
+        fs::write(&file_path, "#!/bin/bash\necho test").unwrap();
+
+        // Set executable permission
+        let mut perms = fs::metadata(&file_path).unwrap().permissions();
+        perms.set_mode(0o755);
+        fs::set_permissions(&file_path, perms).unwrap();
+
+        // Verify permission was set
+        let new_perms = fs::metadata(&file_path).unwrap().permissions();
+        assert_eq!(new_perms.mode() & 0o777, 0o755);
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn test_windows_specific_paths() {
+        // Test Windows-specific path handling
+        // Note: This test runs only on Windows
+
+        // Windows absolute paths can start with drive letter
+        let path = PathBuf::from("C:\\Users\\Test\\file.txt");
+        assert!(path.is_absolute());
+
+        // Verify components are parsed correctly
+        let components: Vec<_> = path.components().collect();
+        assert!(!components.is_empty());
+    }
+
+    #[test]
+    fn test_relative_vs_absolute_paths() {
+        // Test relative path
+        let rel_path = PathBuf::from("assets").join("test");
+        assert!(!rel_path.is_absolute());
+
+        // Test absolute path detection (platform-specific format)
+        #[cfg(unix)]
+        {
+            let abs_path = PathBuf::from("/tmp/test");
+            assert!(abs_path.is_absolute());
+        }
+
+        #[cfg(windows)]
+        {
+            let abs_path = PathBuf::from("C:\\temp\\test");
+            assert!(abs_path.is_absolute());
+        }
+    }
+
+    #[test]
+    fn test_path_equality_normalization() {
+        // Verify path equality works correctly
+        let path1 = PathBuf::from("a").join("b").join("c");
+        let path2 = PathBuf::from("a/b/c");
+
+        // On Unix, these should be equal
+        // On Windows, forward slashes are normalized to backslashes
+        #[cfg(unix)]
+        assert_eq!(path1, path2);
+
+        #[cfg(windows)]
+        {
+            // Paths use backslashes on Windows
+            assert_eq!(path1.to_string_lossy().replace('/', "\\"), path2.to_string_lossy().replace('/', "\\"));
+        }
+    }
+
+    #[test]
+    fn test_asset_importer_cross_platform_paths() {
+        use tempfile::TempDir;
+
+        let temp_dir = TempDir::new().unwrap();
+        let base_dir = temp_dir.path().join("assets");
+        fs::create_dir_all(&base_dir).unwrap();
+
+        let importer = AssetImporter::new(base_dir.clone());
+
+        // Test temp directory creation
+        let temp_path = importer.create_temp_dir("test_asset").unwrap();
+        assert!(temp_path.exists());
+        assert!(temp_path.to_string_lossy().contains("test_asset"));
+        assert!(temp_path.to_string_lossy().contains(".tmp_extract"));
+
+        // Verify it's a subdirectory of base_dir
+        assert!(temp_path.starts_with(&base_dir));
+    }
 }
