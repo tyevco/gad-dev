@@ -76,6 +76,49 @@ impl Default for AssetCategory {
     }
 }
 
+/// Represents a dependency on another asset
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct AssetDependency {
+    /// ID of the dependent asset
+    pub asset_id: String,
+
+    /// Name of the dependent asset
+    pub asset_name: String,
+
+    /// Required version or version constraint (e.g., "1.0.0", ">=2.0.0", "^1.5.0")
+    pub version_requirement: String,
+
+    /// Whether this dependency is optional or required
+    pub optional: bool,
+}
+
+impl AssetDependency {
+    /// Creates a new required dependency
+    pub fn new(asset_id: String, asset_name: String, version_requirement: String) -> Self {
+        Self {
+            asset_id,
+            asset_name,
+            version_requirement,
+            optional: false,
+        }
+    }
+
+    /// Creates a new optional dependency
+    pub fn optional(asset_id: String, asset_name: String, version_requirement: String) -> Self {
+        Self {
+            asset_id,
+            asset_name,
+            version_requirement,
+            optional: true,
+        }
+    }
+
+    /// Checks if this dependency is required
+    pub fn is_required(&self) -> bool {
+        !self.optional
+    }
+}
+
 /// Represents an asset in the Godot Asset Library
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Asset {
@@ -108,6 +151,9 @@ pub struct Asset {
 
     /// URL to download the asset
     pub download_url: String,
+
+    /// Dependencies on other assets
+    pub dependencies: Vec<AssetDependency>,
 }
 
 impl Asset {
@@ -123,6 +169,7 @@ impl Asset {
         tags: Vec<String>,
         preview_url: Option<String>,
         download_url: String,
+        dependencies: Vec<AssetDependency>,
     ) -> Self {
         Self {
             id,
@@ -135,6 +182,7 @@ impl Asset {
             tags,
             preview_url,
             download_url,
+            dependencies,
         }
     }
 
@@ -151,6 +199,38 @@ impl Asset {
             tags: Vec::new(),
             preview_url: None,
             download_url: String::new(),
+            dependencies: Vec::new(),
         }
+    }
+
+    /// Adds a dependency to this asset
+    pub fn add_dependency(&mut self, dependency: AssetDependency) {
+        self.dependencies.push(dependency);
+    }
+
+    /// Checks if this asset has any dependencies
+    pub fn has_dependencies(&self) -> bool {
+        !self.dependencies.is_empty()
+    }
+
+    /// Gets all required dependencies (non-optional)
+    pub fn required_dependencies(&self) -> Vec<&AssetDependency> {
+        self.dependencies
+            .iter()
+            .filter(|dep| dep.is_required())
+            .collect()
+    }
+
+    /// Gets all optional dependencies
+    pub fn optional_dependencies(&self) -> Vec<&AssetDependency> {
+        self.dependencies
+            .iter()
+            .filter(|dep| dep.optional)
+            .collect()
+    }
+
+    /// Checks if this asset depends on another asset by ID
+    pub fn depends_on(&self, asset_id: &str) -> bool {
+        self.dependencies.iter().any(|dep| dep.asset_id == asset_id)
     }
 }
