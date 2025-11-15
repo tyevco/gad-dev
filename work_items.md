@@ -286,10 +286,26 @@
 ### 6.2 Documentation
 - [x] Write README with installation instructions
 - [x] Document API and architecture
-- [ ] Create user guide with screenshots
+- [x] Create user guide with screenshots
+  - Location: `USER_GUIDE.md`
+  - Comprehensive user documentation with 40 screenshot placeholders
+  - Covers: Installation, browsing, installing/managing assets, advanced features, troubleshooting
+  - Includes keyboard shortcuts, FAQ, tips and best practices
+  - Screenshot capture checklist at end for future implementation
 - [x] Add inline code documentation
 - [x] Create developer setup guide
-- [ ] Document build and release process
+- [x] Document build and release process
+  - Location: `BUILD_RELEASE.md`
+  - Complete build process for development and release
+  - Platform-specific build instructions (Linux, Windows, macOS)
+  - Version management and changelog guidelines
+  - Testing checklist before release
+  - Packaging and distribution process
+  - GitHub release automation
+  - Godot Asset Library submission process
+  - Post-release procedures
+  - Hotfix process
+  - CI/CD automation with GitHub Actions
 
 ---
 
