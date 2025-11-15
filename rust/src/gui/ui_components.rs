@@ -306,3 +306,204 @@ impl AssetBrowserTheme {
         style_box
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Note: Most GUI components require Godot engine runtime for full testing.
+    // These tests focus on testable logic and constants.
+
+    #[test]
+    fn test_asset_browser_theme_color_constants() {
+        // Verify color constants are within valid ranges (0.0-1.0)
+        assert!(AssetBrowserTheme::PRIMARY_COLOR.r >= 0.0 && AssetBrowserTheme::PRIMARY_COLOR.r <= 1.0);
+        assert!(AssetBrowserTheme::PRIMARY_COLOR.g >= 0.0 && AssetBrowserTheme::PRIMARY_COLOR.g <= 1.0);
+        assert!(AssetBrowserTheme::PRIMARY_COLOR.b >= 0.0 && AssetBrowserTheme::PRIMARY_COLOR.b <= 1.0);
+
+        assert!(AssetBrowserTheme::SECONDARY_COLOR.r >= 0.0 && AssetBrowserTheme::SECONDARY_COLOR.r <= 1.0);
+        assert!(AssetBrowserTheme::BACKGROUND_COLOR.r >= 0.0 && AssetBrowserTheme::BACKGROUND_COLOR.r <= 1.0);
+        assert!(AssetBrowserTheme::SURFACE_COLOR.r >= 0.0 && AssetBrowserTheme::SURFACE_COLOR.r <= 1.0);
+        assert!(AssetBrowserTheme::ERROR_COLOR.r >= 0.0 && AssetBrowserTheme::ERROR_COLOR.r <= 1.0);
+        assert!(AssetBrowserTheme::SUCCESS_COLOR.r >= 0.0 && AssetBrowserTheme::SUCCESS_COLOR.r <= 1.0);
+        assert!(AssetBrowserTheme::WARNING_COLOR.r >= 0.0 && AssetBrowserTheme::WARNING_COLOR.r <= 1.0);
+        assert!(AssetBrowserTheme::TEXT_COLOR.r >= 0.0 && AssetBrowserTheme::TEXT_COLOR.r <= 1.0);
+        assert!(AssetBrowserTheme::TEXT_SECONDARY_COLOR.r >= 0.0 && AssetBrowserTheme::TEXT_SECONDARY_COLOR.r <= 1.0);
+    }
+
+    #[test]
+    fn test_asset_browser_theme_color_semantics() {
+        // Error color should be predominantly red
+        assert!(AssetBrowserTheme::ERROR_COLOR.r > 0.5);
+        assert!(AssetBrowserTheme::ERROR_COLOR.g < 0.5);
+        assert!(AssetBrowserTheme::ERROR_COLOR.b < 0.5);
+
+        // Success color should be predominantly green
+        assert!(AssetBrowserTheme::SUCCESS_COLOR.g > 0.5);
+        assert!(AssetBrowserTheme::SUCCESS_COLOR.r < 0.5);
+        assert!(AssetBrowserTheme::SUCCESS_COLOR.b < 0.5);
+
+        // Warning color should have high red and moderate green (yellow-orange)
+        assert!(AssetBrowserTheme::WARNING_COLOR.r > 0.5);
+        assert!(AssetBrowserTheme::WARNING_COLOR.g > 0.3);
+        assert!(AssetBrowserTheme::WARNING_COLOR.b < 0.5);
+
+        // Background should be dark
+        assert!(AssetBrowserTheme::BACKGROUND_COLOR.r < 0.3);
+        assert!(AssetBrowserTheme::BACKGROUND_COLOR.g < 0.3);
+        assert!(AssetBrowserTheme::BACKGROUND_COLOR.b < 0.3);
+
+        // Text should be light
+        assert!(AssetBrowserTheme::TEXT_COLOR.r > 0.8);
+        assert!(AssetBrowserTheme::TEXT_COLOR.g > 0.8);
+        assert!(AssetBrowserTheme::TEXT_COLOR.b > 0.8);
+
+        // Secondary text should be lighter than background but darker than primary text
+        assert!(AssetBrowserTheme::TEXT_SECONDARY_COLOR.r > AssetBrowserTheme::BACKGROUND_COLOR.r);
+        assert!(AssetBrowserTheme::TEXT_SECONDARY_COLOR.r < AssetBrowserTheme::TEXT_COLOR.r);
+    }
+
+    #[test]
+    fn test_asset_browser_theme_spacing_constants() {
+        // Verify spacing constants are positive and in ascending order
+        assert!(AssetBrowserTheme::PADDING_SMALL > 0.0);
+        assert!(AssetBrowserTheme::PADDING_MEDIUM > 0.0);
+        assert!(AssetBrowserTheme::PADDING_LARGE > 0.0);
+
+        assert!(AssetBrowserTheme::PADDING_SMALL < AssetBrowserTheme::PADDING_MEDIUM);
+        assert!(AssetBrowserTheme::PADDING_MEDIUM < AssetBrowserTheme::PADDING_LARGE);
+
+        // Verify spacing is within reasonable UI bounds
+        assert!(AssetBrowserTheme::PADDING_SMALL <= 10.0);
+        assert!(AssetBrowserTheme::PADDING_LARGE <= 50.0);
+    }
+
+    #[test]
+    fn test_asset_browser_theme_border_radius_constants() {
+        // Verify border radius constants are positive and in ascending order
+        assert!(AssetBrowserTheme::BORDER_RADIUS_SMALL > 0);
+        assert!(AssetBrowserTheme::BORDER_RADIUS_MEDIUM > 0);
+        assert!(AssetBrowserTheme::BORDER_RADIUS_LARGE > 0);
+
+        assert!(AssetBrowserTheme::BORDER_RADIUS_SMALL < AssetBrowserTheme::BORDER_RADIUS_MEDIUM);
+        assert!(AssetBrowserTheme::BORDER_RADIUS_MEDIUM < AssetBrowserTheme::BORDER_RADIUS_LARGE);
+
+        // Verify border radius is within reasonable UI bounds
+        assert!(AssetBrowserTheme::BORDER_RADIUS_SMALL <= 10);
+        assert!(AssetBrowserTheme::BORDER_RADIUS_LARGE <= 50);
+    }
+
+    #[test]
+    fn test_loading_spinner_state_initialization() {
+        // Test that LoadingSpinner initializes with correct defaults
+        // Note: Cannot test Godot node creation without engine, but can document expected behavior
+
+        // Expected defaults:
+        // - message: "Loading..."
+        // - progress: 0.0
+        // - indeterminate: true
+
+        // This is a documentation test - actual testing requires Godot engine
+    }
+
+    #[test]
+    fn test_loading_spinner_progress_clamping() {
+        // Document expected behavior for progress clamping
+        // set_progress should clamp values to 0.0-100.0 range
+
+        // Expected behavior when set_progress is called:
+        // - Values < 0.0 should become 0.0
+        // - Values > 100.0 should become 100.0
+        // - Values in range stay unchanged
+        // - indeterminate should be set to false
+
+        // Actual testing requires Godot engine runtime
+    }
+
+    #[test]
+    fn test_error_message_initialization() {
+        // Test that ErrorMessage initializes with correct defaults
+        // Note: Cannot test Godot node creation without engine
+
+        // Expected defaults:
+        // - error_title: "Error"
+        // - error_message: empty string
+
+        // This is a documentation test - actual testing requires Godot engine
+    }
+
+    #[test]
+    fn test_confirmation_dialog_initialization() {
+        // Test that ConfirmationDialog initializes with correct defaults
+        // Note: Cannot test Godot node creation without engine
+
+        // Expected defaults:
+        // - title: "Confirm Action"
+        // - message: "Are you sure you want to proceed?"
+        // - confirm_text: "Confirm"
+        // - cancel_text: "Cancel"
+
+        // This is a documentation test - actual testing requires Godot engine
+    }
+
+    #[test]
+    fn test_color_rgb_constructor_compatibility() {
+        // Verify that Color::from_rgb creates valid colors
+        let color = Color::from_rgb(0.5, 0.7, 0.9);
+        assert_eq!(color.r, 0.5);
+        assert_eq!(color.g, 0.7);
+        assert_eq!(color.b, 0.9);
+        assert_eq!(color.a, 1.0); // Alpha should default to 1.0
+    }
+
+    #[test]
+    fn test_theme_constants_consistency() {
+        // Verify that theme constants have consistent patterns
+
+        // Primary and secondary colors should be related (blue tones)
+        assert!(AssetBrowserTheme::PRIMARY_COLOR.b > AssetBrowserTheme::PRIMARY_COLOR.r);
+        assert!(AssetBrowserTheme::SECONDARY_COLOR.b > AssetBrowserTheme::SECONDARY_COLOR.r);
+
+        // Secondary should be lighter than primary
+        assert!(AssetBrowserTheme::SECONDARY_COLOR.r >= AssetBrowserTheme::PRIMARY_COLOR.r);
+        assert!(AssetBrowserTheme::SECONDARY_COLOR.g >= AssetBrowserTheme::PRIMARY_COLOR.g);
+        assert!(AssetBrowserTheme::SECONDARY_COLOR.b >= AssetBrowserTheme::PRIMARY_COLOR.b);
+    }
+
+    #[test]
+    fn test_spacing_proportions() {
+        // Verify spacing follows reasonable proportions
+        let ratio_medium_to_small = AssetBrowserTheme::PADDING_MEDIUM / AssetBrowserTheme::PADDING_SMALL;
+        let ratio_large_to_medium = AssetBrowserTheme::PADDING_LARGE / AssetBrowserTheme::PADDING_MEDIUM;
+
+        // Ratios should be similar (geometric progression)
+        assert!(ratio_medium_to_small >= 1.5);
+        assert!(ratio_medium_to_small <= 3.0);
+        assert!(ratio_large_to_medium >= 1.5);
+        assert!(ratio_large_to_medium <= 3.0);
+    }
+
+    #[test]
+    fn test_border_radius_proportions() {
+        // Verify border radius follows reasonable proportions
+        let ratio_medium_to_small = AssetBrowserTheme::BORDER_RADIUS_MEDIUM as f32 / AssetBrowserTheme::BORDER_RADIUS_SMALL as f32;
+        let ratio_large_to_medium = AssetBrowserTheme::BORDER_RADIUS_LARGE as f32 / AssetBrowserTheme::BORDER_RADIUS_MEDIUM as f32;
+
+        // Ratios should be similar (geometric progression)
+        assert!(ratio_medium_to_small >= 1.5);
+        assert!(ratio_medium_to_small <= 3.0);
+        assert!(ratio_large_to_medium >= 1.2);
+        assert!(ratio_large_to_medium <= 2.0);
+    }
+
+    // Integration tests that require Godot engine runtime
+    // These would be implemented in Godot GDScript test files:
+    //
+    // - test_create_styled_panel_visual()
+    // - test_create_styled_button_visual()
+    // - test_loading_spinner_display()
+    // - test_error_message_display()
+    // - test_confirmation_dialog_interaction()
+    // - test_loading_spinner_progress_updates()
+    // - test_theme_application_to_nodes()
+}
