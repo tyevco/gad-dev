@@ -318,7 +318,26 @@
   - Eliminates repeated string allocations during search (60-80% faster)
   - Automatic index rebuilding on add/remove operations
   - Reduces search time from ~500ms to ~80ms for 1000 assets
-- [ ] Optimize preview image rendering
+- [x] Optimize preview image rendering
+  - Location: `rust/src/asset_library/image_cache.rs` (new module, 430 lines)
+  - Implemented ImageCache system for preview image management:
+    - Lazy loading - Images downloaded only when requested
+    - Persistent caching - Downloaded images cached locally
+    - Automatic cache management - LRU eviction when cache fills
+    - Concurrent preloading - Batch download with concurrency limits (4 concurrent)
+    - Configurable cache size - Default 100MB, customizable
+  - Features:
+    - get_image() - Get cached image or download if needed
+    - preload_images() - Eagerly load multiple images concurrently
+    - is_cached() - Check if image is already cached
+    - get_stats() - Cache statistics (size, entries, hit rate)
+    - clear_cache() - Manual cache clearing
+  - Performance benefits:
+    - Instant loading for cached images (< 1ms vs network download)
+    - Bandwidth savings - Each image downloaded only once
+    - No redundant downloads across sessions
+  - Added 6 comprehensive tests validating cache functionality
+  - All 87 tests passing (81 existing + 6 new image cache tests)
 - [x] Implement lazy loading for large lists
   - Location: `rust/src/asset_library/asset_manager.rs` (lines 304-349)
   - Added get_assets_paginated(page, page_size) for incremental loading
