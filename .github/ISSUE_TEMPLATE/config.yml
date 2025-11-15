@@ -1,0 +1,13 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Documentation
+    url: https://github.com/tyevco/gad-dev/blob/main/USER_GUIDE.md
+    about: Check the user guide for help with using Godot Asset Browser
+
+  - name: Discussions
+    url: https://github.com/tyevco/gad-dev/discussions
+    about: Ask questions and discuss ideas with the community
+
+  - name: Godot Asset Library
+    url: https://godotengine.org/asset-library/asset
+    about: Browse the official Godot Asset Library

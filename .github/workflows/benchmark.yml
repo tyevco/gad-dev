@@ -1,0 +1,84 @@
+name: Performance Benchmarks
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - 'rust/src/**'
+      - 'rust/benches/**'
+      - 'rust/Cargo.toml'
+  pull_request:
+    branches: [ main, develop ]
+    paths:
+      - 'rust/src/**'
+      - 'rust/benches/**'
+      - 'rust/Cargo.toml'
+  schedule:
+    # Run weekly on Sundays at 00:00 UTC
+    - cron: '0 0 * * 0'
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  benchmark:
+    name: Run Benchmarks
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        submodules: recursive
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+
+    - name: Install Linux dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y libssl-dev pkg-config
+
+    - name: Cache cargo build
+      uses: actions/cache@v4
+      with:
+        path: rust/target
+        key: ${{ runner.os }}-bench-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-bench-
+
+    - name: Run benchmarks
+      working-directory: ./rust
+      run: cargo bench --bench asset_loading -- --output-format bencher | tee benchmark_results.txt
+
+    - name: Store benchmark result
+      uses: benchmark-action/github-action-benchmark@v1
+      if: github.event_name != 'pull_request'
+      with:
+        name: Rust Benchmark
+        tool: 'cargo'
+        output-file-path: rust/benchmark_results.txt
+        github-token: ${{ secrets.GITHUB_TOKEN }}
+        auto-push: true
+        alert-threshold: '150%'
+        comment-on-alert: true
+        fail-on-alert: false
+        alert-comment-cc-users: '@tyevco'
+
+    - name: Upload benchmark results
+      uses: actions/upload-artifact@v4
+      with:
+        name: benchmark-results
+        path: rust/target/criterion/
+
+    - name: Comment benchmark result on PR
+      if: github.event_name == 'pull_request'
+      uses: benchmark-action/github-action-benchmark@v1
+      with:
+        name: Rust Benchmark
+        tool: 'cargo'
+        output-file-path: rust/benchmark_results.txt
+        github-token: ${{ secrets.GITHUB_TOKEN }}
+        comment-always: true
+        summary-always: true
