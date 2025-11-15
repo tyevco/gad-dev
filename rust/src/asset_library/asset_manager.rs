@@ -9,6 +9,17 @@ use tar::Archive;
 use flate2::read::GzDecoder;
 use crate::asset_library::asset::{Asset, AssetCategory};
 
+// Conditional print macro that only prints when not testing
+#[cfg(not(test))]
+macro_rules! debug_print {
+    ($($arg:tt)*) => { godot_print!($($arg)*) };
+}
+
+#[cfg(test)]
+macro_rules! debug_print {
+    ($($arg:tt)*) => { /* no-op in tests */ };
+}
+
 #[derive(GodotClass)]
 #[class(init)]
 pub struct AssetManager {
@@ -1349,9 +1360,9 @@ impl AssetImporter {
 
         // Log warnings if any
         if !validation.warnings.is_empty() {
-            godot_print!("Import warnings for {}:", asset_id);
+            debug_print!("Import warnings for {}:", asset_id);
             for warning in &validation.warnings {
-                godot_print!("  - {}", warning);
+                debug_print!("  - {}", warning);
             }
         }
 
@@ -1596,8 +1607,8 @@ impl AssetImporter {
         // Note: Full Godot integration would require calling Godot's resource
         // scanner API, which will be implemented when Godot engine integration is ready
 
-        godot_print!("Asset imported to: {:?}", asset_dir);
-        godot_print!("Restart Godot editor or reimport to see changes");
+        debug_print!("Asset imported to: {:?}", asset_dir);
+        debug_print!("Restart Godot editor or reimport to see changes");
 
         Ok(())
     }
@@ -1622,7 +1633,7 @@ impl AssetImporter {
     /// Cleans up temporary directory, respecting preserve_temp_on_error setting
     fn cleanup_temp_dir(&self, temp_dir: &Path) -> Result<(), String> {
         if self.preserve_temp_on_error {
-            godot_print!("Preserving temp directory for debugging: {:?}", temp_dir);
+            debug_print!("Preserving temp directory for debugging: {:?}", temp_dir);
             return Ok(());
         }
 
@@ -1641,7 +1652,7 @@ impl AssetImporter {
         if asset_dir.exists() {
             fs::remove_dir_all(&asset_dir)
                 .map_err(|e| format!("Failed to rollback import: {}", e))?;
-            godot_print!("Rolled back import for asset: {}", asset_id);
+            debug_print!("Rolled back import for asset: {}", asset_id);
         }
 
         // Also clean up any temp directories
@@ -2015,5 +2026,925 @@ mod tests {
         // Now it should return an error since it's installed but not in catalog
         let result = manager.check_for_update("nonexistent_asset_xyz");
         assert!(result.is_err(), "Should return error for installed asset not in catalog");
+    }
+
+    // ==================== Integration Tests for Import Functionality ====================
+
+    /// Helper function to create a test ZIP archive with given files
+    fn create_test_zip(path: &Path, files: Vec<(&str, &str)>) -> Result<(), Box<dyn std::error::Error>> {
+        use std::io::Write;
+        use zip::write::{FileOptions, ZipWriter};
+
+        let file = fs::File::create(path)?;
+        let mut zip = ZipWriter::new(file);
+        let options: FileOptions<'_, ()> = FileOptions::default().compression_method(zip::CompressionMethod::Stored);
+
+        for (filename, content) in files {
+            // Handle directory entries
+            if filename.ends_with('/') {
+                zip.add_directory(filename, options)?;
+            } else {
+                zip.start_file(filename, options)?;
+                zip.write_all(content.as_bytes())?;
+            }
+        }
+
+        zip.finish()?;
+        Ok(())
+    }
+
+    /// Helper function to create a test tar.gz archive with given files
+    fn create_test_tar_gz(path: &Path, files: Vec<(&str, &str)>) -> Result<(), Box<dyn std::error::Error>> {
+        use std::io::Write;
+        use tar::Builder;
+        use flate2::write::GzEncoder;
+        use flate2::Compression;
+
+        let tar_gz = fs::File::create(path)?;
+        let enc = GzEncoder::new(tar_gz, Compression::default());
+        let mut tar = Builder::new(enc);
+
+        for (filename, content) in files {
+            let mut header = tar::Header::new_gnu();
+            let bytes = content.as_bytes();
+            header.set_size(bytes.len() as u64);
+            header.set_mode(0o644);
+            header.set_cksum();
+            tar.append_data(&mut header, filename, bytes)?;
+        }
+
+        tar.finish()?;
+        Ok(())
+    }
+
+    /// Helper to create a valid asset metadata JSON
+    fn create_valid_metadata() -> String {
+        serde_json::json!({
+            "name": "Test Asset",
+            "version": "1.0.0",
+            "description": "A test asset for integration testing",
+            "author": "Test Author"
+        }).to_string()
+    }
+
+    #[test]
+    fn test_asset_importer_new() {
+        let base_dir = PathBuf::from("/tmp/test_assets");
+        let importer = AssetImporter::new(base_dir.clone());
+
+        assert_eq!(importer.base_extract_dir, base_dir);
+        assert_eq!(importer.preserve_temp_on_error, false);
+    }
+
+    #[test]
+    fn test_asset_importer_with_default_dir() {
+        let importer = AssetImporter::with_default_dir();
+        assert_eq!(importer.base_extract_dir, PathBuf::from("res://addons/"));
+    }
+
+    #[test]
+    fn test_asset_importer_set_preserve_temp() {
+        let mut importer = AssetImporter::new(PathBuf::from("/tmp/test"));
+
+        assert_eq!(importer.preserve_temp_on_error, false);
+
+        importer.set_preserve_temp(true);
+        assert_eq!(importer.preserve_temp_on_error, true);
+
+        importer.set_preserve_temp(false);
+        assert_eq!(importer.preserve_temp_on_error, false);
+    }
+
+    #[test]
+    fn test_extract_zip_basic() {
+        use tempfile::TempDir;
+
+        let temp_dir = TempDir::new().unwrap();
+        let zip_path = temp_dir.path().join("test.zip");
+        let extract_dir = temp_dir.path().join("extracted");
+
+        // Create a test ZIP with some files
+        let metadata = create_valid_metadata();
+        let files = vec![
+            ("asset.json", metadata.as_str()),
+            ("script.gd", "extends Node\n\nfunc _ready():\n\tpass"),
+            ("scene.tscn", "[gd_scene load_steps=1 format=3]"),
+        ];
+
+        create_test_zip(&zip_path, files).unwrap();
+
+        let importer = AssetImporter::new(extract_dir.clone());
+        let result = importer.extract_zip(&zip_path, &extract_dir);
+
+        assert!(result.is_ok(), "ZIP extraction should succeed");
+        assert!(extract_dir.join("asset.json").exists());
+        assert!(extract_dir.join("script.gd").exists());
+        assert!(extract_dir.join("scene.tscn").exists());
+    }
+
+    #[test]
+    fn test_extract_zip_with_directories() {
+        use tempfile::TempDir;
+
+        let temp_dir = TempDir::new().unwrap();
+        let zip_path = temp_dir.path().join("test.zip");
+        let extract_dir = temp_dir.path().join("extracted");
+
+        // Create a test ZIP with directories
+        let metadata = create_valid_metadata();
+        let files = vec![
+            ("subdir/", ""),
+            ("subdir/file.gd", "# Test script"),
+            ("asset.json", metadata.as_str()),
+        ];
+
+        create_test_zip(&zip_path, files).unwrap();
+
+        let importer = AssetImporter::new(extract_dir.clone());
+        let result = importer.extract_zip(&zip_path, &extract_dir);
+
+        assert!(result.is_ok(), "ZIP extraction with directories should succeed");
+        assert!(extract_dir.join("subdir").is_dir());
+        assert!(extract_dir.join("subdir/file.gd").exists());
+    }
+
+    #[test]
+    fn test_extract_zip_nonexistent_file() {
+        use tempfile::TempDir;
+
+        let temp_dir = TempDir::new().unwrap();
+        let zip_path = temp_dir.path().join("nonexistent.zip");
+        let extract_dir = temp_dir.path().join("extracted");
+
+        let importer = AssetImporter::new(extract_dir.clone());
+        let result = importer.extract_zip(&zip_path, &extract_dir);
+
+        assert!(result.is_err(), "Should fail when ZIP file doesn't exist");
+        assert!(result.unwrap_err().contains("Failed to open zip file"));
+    }
+
+    #[test]
+    fn test_extract_tar_gz_basic() {
+        use tempfile::TempDir;
+
+        let temp_dir = TempDir::new().unwrap();
+        let tar_gz_path = temp_dir.path().join("test.tar.gz");
+        let extract_dir = temp_dir.path().join("extracted");
+
+        // Create a test tar.gz with some files
+        let metadata = create_valid_metadata();
+        let files = vec![
+            ("asset.json", metadata.as_str()),
+            ("script.gd", "extends Node\n\nfunc _ready():\n\tpass"),
+        ];
+
+        create_test_tar_gz(&tar_gz_path, files).unwrap();
+
+        let importer = AssetImporter::new(extract_dir.clone());
+        let result = importer.extract_tar_gz(&tar_gz_path, &extract_dir);
+
+        assert!(result.is_ok(), "tar.gz extraction should succeed");
+        assert!(extract_dir.join("asset.json").exists());
+        assert!(extract_dir.join("script.gd").exists());
+    }
+
+    #[test]
+    fn test_validate_asset_success() {
+        use tempfile::TempDir;
+
+        let temp_dir = TempDir::new().unwrap();
+        let asset_dir = temp_dir.path().join("test_asset");
+        fs::create_dir_all(&asset_dir).unwrap();
+
+        // Create valid asset files
+        fs::write(asset_dir.join("asset.json"), create_valid_metadata()).unwrap();
+        fs::write(asset_dir.join("scene.tscn"), "[gd_scene]").unwrap();
+
+        let importer = AssetImporter::new(PathBuf::from("/tmp"));
+        let result = importer.validate_asset(&asset_dir);
+
+        assert!(result.is_ok());
+        let validation = result.unwrap();
+        assert!(validation.is_valid(), "Asset should be valid");
+    }
+
+    #[test]
+    fn test_validate_asset_missing_metadata() {
+        use tempfile::TempDir;
+
+        let temp_dir = TempDir::new().unwrap();
+        let asset_dir = temp_dir.path().join("test_asset");
+        fs::create_dir_all(&asset_dir).unwrap();
+
+        // Create asset without metadata
+        fs::write(asset_dir.join("scene.tscn"), "[gd_scene]").unwrap();
+
+        let importer = AssetImporter::new(PathBuf::from("/tmp"));
+        let result = importer.validate_asset(&asset_dir);
+
+        assert!(result.is_ok());
+        let validation = result.unwrap();
+        // Should still be valid but with warnings
+        assert!(validation.is_valid());
+        assert!(!validation.warnings.is_empty());
+    }
+
+    #[test]
+    fn test_validate_asset_no_content() {
+        use tempfile::TempDir;
+
+        let temp_dir = TempDir::new().unwrap();
+        let asset_dir = temp_dir.path().join("test_asset");
+        fs::create_dir_all(&asset_dir).unwrap();
+
+        // Create metadata but no Godot files
+        fs::write(asset_dir.join("asset.json"), create_valid_metadata()).unwrap();
+        fs::write(asset_dir.join("readme.txt"), "Just a readme").unwrap();
+
+        let importer = AssetImporter::new(PathBuf::from("/tmp"));
+        let result = importer.validate_asset(&asset_dir);
+
+        assert!(result.is_ok());
+        let validation = result.unwrap();
+        // Should be valid but with warning about no content files
+        assert!(validation.is_valid());
+        assert!(validation.warnings.iter().any(|w| w.contains("No recognizable Godot asset files")));
+    }
+
+    #[test]
+    fn test_validate_asset_nonexistent_directory() {
+        let importer = AssetImporter::new(PathBuf::from("/tmp"));
+        let result = importer.validate_asset(&PathBuf::from("/nonexistent/path"));
+
+        assert!(result.is_ok());
+        let validation = result.unwrap();
+        assert!(!validation.is_valid(), "Should be invalid for nonexistent directory");
+        assert!(!validation.errors.is_empty());
+    }
+
+    #[test]
+    fn test_validate_metadata_success() {
+        use tempfile::TempDir;
+
+        let temp_dir = TempDir::new().unwrap();
+        let metadata_path = temp_dir.path().join("asset.json");
+        fs::write(&metadata_path, create_valid_metadata()).unwrap();
+
+        let importer = AssetImporter::new(PathBuf::from("/tmp"));
+        let result = importer.validate_metadata(&metadata_path);
+
+        assert!(result.is_ok());
+        let warnings = result.unwrap();
+        assert!(warnings.is_empty(), "Valid metadata should have no warnings");
+    }
+
+    #[test]
+    fn test_validate_metadata_missing_fields() {
+        use tempfile::TempDir;
+
+        let temp_dir = TempDir::new().unwrap();
+        let metadata_path = temp_dir.path().join("asset.json");
+
+        // Create metadata with missing fields
+        let incomplete_metadata = serde_json::json!({
+            "name": "Test Asset"
+            // Missing version, description, author
+        }).to_string();
+
+        fs::write(&metadata_path, incomplete_metadata).unwrap();
+
+        let importer = AssetImporter::new(PathBuf::from("/tmp"));
+        let result = importer.validate_metadata(&metadata_path);
+
+        assert!(result.is_ok());
+        let warnings = result.unwrap();
+        assert!(!warnings.is_empty(), "Should have warnings for missing fields");
+        assert!(warnings.iter().any(|w| w.contains("version")));
+        assert!(warnings.iter().any(|w| w.contains("description")));
+        assert!(warnings.iter().any(|w| w.contains("author")));
+    }
+
+    #[test]
+    fn test_validate_metadata_invalid_json() {
+        use tempfile::TempDir;
+
+        let temp_dir = TempDir::new().unwrap();
+        let metadata_path = temp_dir.path().join("asset.json");
+        fs::write(&metadata_path, "{ invalid json }").unwrap();
+
+        let importer = AssetImporter::new(PathBuf::from("/tmp"));
+        let result = importer.validate_metadata(&metadata_path);
+
+        assert!(result.is_err(), "Should fail for invalid JSON");
+        assert!(result.unwrap_err().contains("Invalid JSON"));
+    }
+
+    #[test]
+    fn test_check_for_content_files_success() {
+        use tempfile::TempDir;
+
+        let temp_dir = TempDir::new().unwrap();
+        let asset_dir = temp_dir.path().join("test_asset");
+        fs::create_dir_all(&asset_dir).unwrap();
+
+        // Create various Godot content files
+        fs::write(asset_dir.join("scene.tscn"), "test").unwrap();
+        fs::write(asset_dir.join("resource.tres"), "test").unwrap();
+        fs::write(asset_dir.join("script.gd"), "test").unwrap();
+
+        let importer = AssetImporter::new(PathBuf::from("/tmp"));
+        let has_content = importer.check_for_content_files(&asset_dir);
+
+        assert!(has_content, "Should detect Godot content files");
+    }
+
+    #[test]
+    fn test_check_for_content_files_recursive() {
+        use tempfile::TempDir;
+
+        let temp_dir = TempDir::new().unwrap();
+        let asset_dir = temp_dir.path().join("test_asset");
+        let subdir = asset_dir.join("scripts");
+        fs::create_dir_all(&subdir).unwrap();
+
+        // Create Godot file in subdirectory
+        fs::write(subdir.join("script.gd"), "test").unwrap();
+
+        let importer = AssetImporter::new(PathBuf::from("/tmp"));
+        let has_content = importer.check_for_content_files(&asset_dir);
+
+        assert!(has_content, "Should detect Godot files in subdirectories");
+    }
+
+    #[test]
+    fn test_check_for_content_files_none() {
+        use tempfile::TempDir;
+
+        let temp_dir = TempDir::new().unwrap();
+        let asset_dir = temp_dir.path().join("test_asset");
+        fs::create_dir_all(&asset_dir).unwrap();
+
+        // Create non-Godot files
+        fs::write(asset_dir.join("readme.txt"), "test").unwrap();
+        fs::write(asset_dir.join("image.png"), "test").unwrap();
+
+        let importer = AssetImporter::new(PathBuf::from("/tmp"));
+        let has_content = importer.check_for_content_files(&asset_dir);
+
+        assert!(!has_content, "Should not detect content when no Godot files present");
+    }
+
+    #[test]
+    fn test_validate_security_success() {
+        use tempfile::TempDir;
+
+        let temp_dir = TempDir::new().unwrap();
+        let asset_dir = temp_dir.path().join("test_asset");
+        fs::create_dir_all(&asset_dir).unwrap();
+
+        // Create safe files
+        fs::write(asset_dir.join("script.gd"), "test").unwrap();
+        fs::write(asset_dir.join("scene.tscn"), "test").unwrap();
+
+        let importer = AssetImporter::new(PathBuf::from("/tmp"));
+        let result = importer.validate_security(&asset_dir);
+
+        assert!(result.is_ok(), "Should pass security validation for safe files");
+    }
+
+    #[test]
+    fn test_validate_security_suspicious_exe() {
+        use tempfile::TempDir;
+
+        let temp_dir = TempDir::new().unwrap();
+        let asset_dir = temp_dir.path().join("test_asset");
+        fs::create_dir_all(&asset_dir).unwrap();
+
+        // Create suspicious file
+        fs::write(asset_dir.join("malware.exe"), "test").unwrap();
+
+        let importer = AssetImporter::new(PathBuf::from("/tmp"));
+        let result = importer.validate_security(&asset_dir);
+
+        assert!(result.is_err(), "Should fail security validation for .exe files");
+        assert!(result.unwrap_err().contains("Suspicious file"));
+    }
+
+    #[test]
+    fn test_validate_security_suspicious_dll() {
+        use tempfile::TempDir;
+
+        let temp_dir = TempDir::new().unwrap();
+        let asset_dir = temp_dir.path().join("test_asset");
+        fs::create_dir_all(&asset_dir).unwrap();
+
+        // Create suspicious file
+        fs::write(asset_dir.join("library.dll"), "test").unwrap();
+
+        let importer = AssetImporter::new(PathBuf::from("/tmp"));
+        let result = importer.validate_security(&asset_dir);
+
+        assert!(result.is_err(), "Should fail security validation for .dll files");
+    }
+
+    #[test]
+    fn test_validate_security_recursive() {
+        use tempfile::TempDir;
+
+        let temp_dir = TempDir::new().unwrap();
+        let asset_dir = temp_dir.path().join("test_asset");
+        let subdir = asset_dir.join("subdir");
+        fs::create_dir_all(&subdir).unwrap();
+
+        // Create suspicious file in subdirectory
+        fs::write(subdir.join("script.sh"), "#!/bin/bash").unwrap();
+
+        let importer = AssetImporter::new(PathBuf::from("/tmp"));
+        let result = importer.validate_security(&asset_dir);
+
+        assert!(result.is_err(), "Should detect suspicious files in subdirectories");
+    }
+
+    #[test]
+    fn test_import_asset_zip_success() {
+        use tempfile::TempDir;
+
+        let temp_dir = TempDir::new().unwrap();
+        let zip_path = temp_dir.path().join("test.zip");
+        let base_dir = temp_dir.path().join("assets");
+        fs::create_dir_all(&base_dir).unwrap();
+
+        // Create a valid test ZIP
+        let metadata = create_valid_metadata();
+        let files = vec![
+            ("asset.json", metadata.as_str()),
+            ("scene.tscn", "[gd_scene]"),
+            ("script.gd", "extends Node"),
+        ];
+
+        create_test_zip(&zip_path, files).unwrap();
+
+        let importer = AssetImporter::new(base_dir.clone());
+        let result = importer.import_asset(&zip_path, "test_asset");
+
+        assert!(result.is_ok(), "Import should succeed for valid ZIP");
+        let final_path = result.unwrap();
+        assert!(final_path.exists());
+        assert!(final_path.join("asset.json").exists());
+        assert!(final_path.join("scene.tscn").exists());
+        assert!(final_path.join("script.gd").exists());
+    }
+
+    #[test]
+    fn test_import_asset_tar_gz_success() {
+        use tempfile::TempDir;
+
+        let temp_dir = TempDir::new().unwrap();
+        let tar_gz_path = temp_dir.path().join("test.tar.gz");
+        let base_dir = temp_dir.path().join("assets");
+        fs::create_dir_all(&base_dir).unwrap();
+
+        // Create a valid test tar.gz
+        let metadata = create_valid_metadata();
+        let files = vec![
+            ("asset.json", metadata.as_str()),
+            ("scene.tscn", "[gd_scene]"),
+        ];
+
+        create_test_tar_gz(&tar_gz_path, files).unwrap();
+
+        let importer = AssetImporter::new(base_dir.clone());
+        let result = importer.import_asset(&tar_gz_path, "test_asset");
+
+        assert!(result.is_ok(), "Import should succeed for valid tar.gz");
+        let final_path = result.unwrap();
+        assert!(final_path.exists());
+    }
+
+    #[test]
+    fn test_import_asset_nonexistent_file() {
+        use tempfile::TempDir;
+
+        let temp_dir = TempDir::new().unwrap();
+        let base_dir = temp_dir.path().join("assets");
+        let nonexistent = temp_dir.path().join("nonexistent.zip");
+
+        let importer = AssetImporter::new(base_dir);
+        let result = importer.import_asset(&nonexistent, "test_asset");
+
+        assert!(result.is_err(), "Should fail for nonexistent file");
+        assert!(result.unwrap_err().contains("does not exist"));
+    }
+
+    #[test]
+    fn test_import_asset_unsupported_format() {
+        use tempfile::TempDir;
+
+        let temp_dir = TempDir::new().unwrap();
+        let base_dir = temp_dir.path().join("assets");
+        let unsupported = temp_dir.path().join("test.rar");
+        fs::write(&unsupported, "test").unwrap();
+
+        let importer = AssetImporter::new(base_dir);
+        let result = importer.import_asset(&unsupported, "test_asset");
+
+        assert!(result.is_err(), "Should fail for unsupported format");
+        assert!(result.unwrap_err().contains("Unsupported archive format"));
+    }
+
+    #[test]
+    fn test_import_asset_replaces_existing() {
+        use tempfile::TempDir;
+
+        let temp_dir = TempDir::new().unwrap();
+        let zip_path = temp_dir.path().join("test.zip");
+        let base_dir = temp_dir.path().join("assets");
+        fs::create_dir_all(&base_dir).unwrap();
+
+        // Create existing asset directory
+        let existing_dir = base_dir.join("test_asset");
+        fs::create_dir_all(&existing_dir).unwrap();
+        fs::write(existing_dir.join("old_file.txt"), "old content").unwrap();
+
+        // Create new ZIP
+        let metadata = create_valid_metadata();
+        let files = vec![
+            ("asset.json", metadata.as_str()),
+            ("new_file.gd", "extends Node"),
+        ];
+        create_test_zip(&zip_path, files).unwrap();
+
+        let importer = AssetImporter::new(base_dir.clone());
+        let result = importer.import_asset(&zip_path, "test_asset");
+
+        assert!(result.is_ok(), "Import should succeed");
+        let final_path = result.unwrap();
+        assert!(final_path.join("new_file.gd").exists(), "New file should exist");
+        assert!(!final_path.join("old_file.txt").exists(), "Old file should be removed");
+    }
+
+    #[test]
+    fn test_import_asset_security_validation_fails() {
+        use tempfile::TempDir;
+
+        let temp_dir = TempDir::new().unwrap();
+        let zip_path = temp_dir.path().join("malicious.zip");
+        let base_dir = temp_dir.path().join("assets");
+        fs::create_dir_all(&base_dir).unwrap();
+
+        // Create ZIP with suspicious file
+        let metadata = create_valid_metadata();
+        let files = vec![
+            ("asset.json", metadata.as_str()),
+            ("malware.exe", "malicious content"),
+        ];
+        create_test_zip(&zip_path, files).unwrap();
+
+        let importer = AssetImporter::new(base_dir.clone());
+        let result = importer.import_asset(&zip_path, "test_asset");
+
+        assert!(result.is_err(), "Import should fail security validation");
+        assert!(result.unwrap_err().contains("Security validation failed"));
+
+        // Verify temp directory was cleaned up
+        let temp_marker = base_dir.join("test_asset.tmp_extract");
+        assert!(!temp_marker.exists(), "Temp directory should be cleaned up on failure");
+    }
+
+    #[test]
+    fn test_rollback_import_success() {
+        use tempfile::TempDir;
+
+        let temp_dir = TempDir::new().unwrap();
+        let base_dir = temp_dir.path().join("assets");
+        fs::create_dir_all(&base_dir).unwrap();
+
+        // Create an asset directory to rollback
+        let asset_dir = base_dir.join("test_asset");
+        fs::create_dir_all(&asset_dir).unwrap();
+        fs::write(asset_dir.join("file.txt"), "content").unwrap();
+
+        let importer = AssetImporter::new(base_dir.clone());
+        let result = importer.rollback_import("test_asset");
+
+        assert!(result.is_ok(), "Rollback should succeed");
+        assert!(!asset_dir.exists(), "Asset directory should be removed");
+    }
+
+    #[test]
+    fn test_rollback_import_nonexistent() {
+        use tempfile::TempDir;
+
+        let temp_dir = TempDir::new().unwrap();
+        let base_dir = temp_dir.path().join("assets");
+
+        let importer = AssetImporter::new(base_dir);
+        let result = importer.rollback_import("nonexistent_asset");
+
+        // Should succeed even if asset doesn't exist (idempotent)
+        assert!(result.is_ok(), "Rollback should be idempotent");
+    }
+
+    #[test]
+    fn test_rollback_import_cleans_temp_dir() {
+        use tempfile::TempDir;
+
+        let temp_dir = TempDir::new().unwrap();
+        let base_dir = temp_dir.path().join("assets");
+        fs::create_dir_all(&base_dir).unwrap();
+
+        // Create both asset directory and temp directory
+        let asset_dir = base_dir.join("test_asset");
+        let temp_extract_dir = base_dir.join("test_asset.tmp_extract");
+
+        fs::create_dir_all(&asset_dir).unwrap();
+        fs::create_dir_all(&temp_extract_dir).unwrap();
+        fs::write(temp_extract_dir.join("temp.txt"), "temp").unwrap();
+
+        let importer = AssetImporter::new(base_dir.clone());
+        let result = importer.rollback_import("test_asset");
+
+        assert!(result.is_ok(), "Rollback should succeed");
+        assert!(!asset_dir.exists(), "Asset directory should be removed");
+        assert!(!temp_extract_dir.exists(), "Temp directory should be removed");
+    }
+
+    #[test]
+    fn test_create_temp_dir_success() {
+        use tempfile::TempDir;
+
+        let temp_dir = TempDir::new().unwrap();
+        let base_dir = temp_dir.path().join("assets");
+        fs::create_dir_all(&base_dir).unwrap();
+
+        let importer = AssetImporter::new(base_dir.clone());
+        let result = importer.create_temp_dir("test_asset");
+
+        assert!(result.is_ok());
+        let temp_path = result.unwrap();
+        assert!(temp_path.exists());
+        assert!(temp_path.to_string_lossy().contains(".tmp_extract"));
+    }
+
+    #[test]
+    fn test_create_temp_dir_removes_existing() {
+        use tempfile::TempDir;
+
+        let temp_dir = TempDir::new().unwrap();
+        let base_dir = temp_dir.path().join("assets");
+        fs::create_dir_all(&base_dir).unwrap();
+
+        let importer = AssetImporter::new(base_dir.clone());
+
+        // Create temp dir first time
+        let temp_path1 = importer.create_temp_dir("test_asset").unwrap();
+        fs::write(temp_path1.join("old.txt"), "old").unwrap();
+
+        // Create again - should remove old one
+        let temp_path2 = importer.create_temp_dir("test_asset").unwrap();
+
+        assert!(temp_path2.exists());
+        assert!(!temp_path2.join("old.txt").exists(), "Old temp files should be removed");
+    }
+
+    #[test]
+    fn test_integrate_with_godot_creates_marker() {
+        use tempfile::TempDir;
+
+        let temp_dir = TempDir::new().unwrap();
+        let asset_dir = temp_dir.path().join("test_asset");
+        fs::create_dir_all(&asset_dir).unwrap();
+
+        let importer = AssetImporter::new(PathBuf::from("/tmp"));
+        let result = importer.integrate_with_godot(&asset_dir);
+
+        assert!(result.is_ok());
+        assert!(asset_dir.join(".imported").exists(), "Should create .imported marker file");
+    }
+
+    #[test]
+    fn test_validation_result_new() {
+        let result = ValidationResult::new();
+
+        assert!(result.valid);
+        assert!(result.errors.is_empty());
+        assert!(result.warnings.is_empty());
+        assert!(result.is_valid());
+    }
+
+    #[test]
+    fn test_validation_result_add_error() {
+        let mut result = ValidationResult::new();
+
+        result.add_error("Test error".to_string());
+
+        assert!(!result.valid);
+        assert!(!result.is_valid());
+        assert_eq!(result.errors.len(), 1);
+        assert_eq!(result.errors[0], "Test error");
+    }
+
+    #[test]
+    fn test_validation_result_add_warning() {
+        let mut result = ValidationResult::new();
+
+        result.add_warning("Test warning".to_string());
+
+        assert!(result.valid, "Warnings should not affect validity");
+        assert!(result.is_valid());
+        assert_eq!(result.warnings.len(), 1);
+        assert_eq!(result.warnings[0], "Test warning");
+    }
+
+    #[test]
+    fn test_validation_result_multiple_errors() {
+        let mut result = ValidationResult::new();
+
+        result.add_error("Error 1".to_string());
+        result.add_error("Error 2".to_string());
+        result.add_warning("Warning 1".to_string());
+
+        assert!(!result.is_valid());
+        assert_eq!(result.errors.len(), 2);
+        assert_eq!(result.warnings.len(), 1);
+    }
+
+    // ==================== Cross-Platform Compatibility Tests ====================
+
+    #[test]
+    fn test_path_join_cross_platform() {
+        // Verify PathBuf::join creates correct paths on all platforms
+        let base = PathBuf::from("assets");
+        let sub = base.join("test_asset");
+        let file = sub.join("asset.json");
+
+        // Path should be constructed correctly regardless of platform
+        assert!(file.to_string_lossy().contains("assets"));
+        assert!(file.to_string_lossy().contains("test_asset"));
+        assert!(file.to_string_lossy().contains("asset.json"));
+
+        // Verify no hardcoded separators are needed
+        assert_eq!(file, PathBuf::from("assets").join("test_asset").join("asset.json"));
+    }
+
+    #[test]
+    fn test_path_components_platform_agnostic() {
+        // Verify path components work correctly
+        let path = PathBuf::from("base").join("sub1").join("sub2").join("file.txt");
+
+        let components: Vec<_> = path.components()
+            .map(|c| c.as_os_str().to_string_lossy().to_string())
+            .collect();
+
+        assert_eq!(components.len(), 4);
+        assert_eq!(components[0], "base");
+        assert_eq!(components[1], "sub1");
+        assert_eq!(components[2], "sub2");
+        assert_eq!(components[3], "file.txt");
+    }
+
+    #[test]
+    fn test_temp_dir_creation_cross_platform() {
+        use tempfile::TempDir;
+
+        // Verify temporary directory creation works on all platforms
+        let temp_dir = TempDir::new().unwrap();
+        let temp_path = temp_dir.path();
+
+        assert!(temp_path.exists());
+        assert!(temp_path.is_dir());
+
+        // Can create subdirectories
+        let sub_path = temp_path.join("subdir");
+        fs::create_dir_all(&sub_path).unwrap();
+        assert!(sub_path.exists());
+
+        // Can create files
+        let file_path = sub_path.join("test.txt");
+        fs::write(&file_path, "test content").unwrap();
+        assert!(file_path.exists());
+
+        let content = fs::read_to_string(&file_path).unwrap();
+        assert_eq!(content, "test content");
+    }
+
+    #[test]
+    fn test_file_extension_handling() {
+        // Verify file extension detection works correctly
+        let zip_path = PathBuf::from("archive.zip");
+        assert_eq!(zip_path.extension().unwrap(), "zip");
+
+        let tar_gz_path = PathBuf::from("archive.tar.gz");
+        assert_eq!(tar_gz_path.extension().unwrap(), "gz");
+
+        let no_ext = PathBuf::from("file");
+        assert!(no_ext.extension().is_none());
+    }
+
+    #[test]
+    fn test_path_parent_directory() {
+        // Verify parent directory detection
+        let file_path = PathBuf::from("dir1").join("dir2").join("file.txt");
+        let parent = file_path.parent().unwrap();
+
+        assert_eq!(parent, PathBuf::from("dir1").join("dir2"));
+
+        let grandparent = parent.parent().unwrap();
+        assert_eq!(grandparent, PathBuf::from("dir1"));
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn test_unix_specific_permissions() {
+        use tempfile::TempDir;
+        use std::os::unix::fs::PermissionsExt;
+
+        // Test Unix-specific file permission handling
+        let temp_dir = TempDir::new().unwrap();
+        let file_path = temp_dir.path().join("test.sh");
+
+        fs::write(&file_path, "#!/bin/bash\necho test").unwrap();
+
+        // Set executable permission
+        let mut perms = fs::metadata(&file_path).unwrap().permissions();
+        perms.set_mode(0o755);
+        fs::set_permissions(&file_path, perms).unwrap();
+
+        // Verify permission was set
+        let new_perms = fs::metadata(&file_path).unwrap().permissions();
+        assert_eq!(new_perms.mode() & 0o777, 0o755);
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn test_windows_specific_paths() {
+        // Test Windows-specific path handling
+        // Note: This test runs only on Windows
+
+        // Windows absolute paths can start with drive letter
+        let path = PathBuf::from("C:\\Users\\Test\\file.txt");
+        assert!(path.is_absolute());
+
+        // Verify components are parsed correctly
+        let components: Vec<_> = path.components().collect();
+        assert!(!components.is_empty());
+    }
+
+    #[test]
+    fn test_relative_vs_absolute_paths() {
+        // Test relative path
+        let rel_path = PathBuf::from("assets").join("test");
+        assert!(!rel_path.is_absolute());
+
+        // Test absolute path detection (platform-specific format)
+        #[cfg(unix)]
+        {
+            let abs_path = PathBuf::from("/tmp/test");
+            assert!(abs_path.is_absolute());
+        }
+
+        #[cfg(windows)]
+        {
+            let abs_path = PathBuf::from("C:\\temp\\test");
+            assert!(abs_path.is_absolute());
+        }
+    }
+
+    #[test]
+    fn test_path_equality_normalization() {
+        // Verify path equality works correctly
+        let path1 = PathBuf::from("a").join("b").join("c");
+        let path2 = PathBuf::from("a/b/c");
+
+        // On Unix, these should be equal
+        // On Windows, forward slashes are normalized to backslashes
+        #[cfg(unix)]
+        assert_eq!(path1, path2);
+
+        #[cfg(windows)]
+        {
+            // Paths use backslashes on Windows
+            assert_eq!(path1.to_string_lossy().replace('/', "\\"), path2.to_string_lossy().replace('/', "\\"));
+        }
+    }
+
+    #[test]
+    fn test_asset_importer_cross_platform_paths() {
+        use tempfile::TempDir;
+
+        let temp_dir = TempDir::new().unwrap();
+        let base_dir = temp_dir.path().join("assets");
+        fs::create_dir_all(&base_dir).unwrap();
+
+        let importer = AssetImporter::new(base_dir.clone());
+
+        // Test temp directory creation
+        let temp_path = importer.create_temp_dir("test_asset").unwrap();
+        assert!(temp_path.exists());
+        assert!(temp_path.to_string_lossy().contains("test_asset"));
+        assert!(temp_path.to_string_lossy().contains(".tmp_extract"));
+
+        // Verify it's a subdirectory of base_dir
+        assert!(temp_path.starts_with(&base_dir));
     }
 }

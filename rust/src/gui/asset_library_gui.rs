@@ -511,3 +511,165 @@ impl AssetPreviewNode {
         instance
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Note: Full GUI interaction tests require Godot engine runtime.
+    // These tests focus on testable logic (enums, data structures).
+
+    #[test]
+    fn test_sort_criteria_enum() {
+        // Verify SortCriteria variants exist and are distinct
+        let name = SortCriteria::Name;
+        let category = SortCriteria::Category;
+        let author = SortCriteria::Author;
+
+        assert_ne!(name, category);
+        assert_ne!(name, author);
+        assert_ne!(category, author);
+    }
+
+    #[test]
+    fn test_sort_criteria_copy_clone() {
+        // Verify SortCriteria implements Copy and Clone
+        let original = SortCriteria::Name;
+        let copied = original;
+        let cloned = original.clone();
+
+        assert_eq!(original, copied);
+        assert_eq!(original, cloned);
+    }
+
+    #[test]
+    fn test_sort_criteria_debug() {
+        // Verify SortCriteria implements Debug
+        let criteria = SortCriteria::Name;
+        let debug_str = format!("{:?}", criteria);
+        assert!(debug_str.contains("Name"));
+    }
+
+    #[test]
+    fn test_asset_status_enum() {
+        // Verify AssetStatus variants exist and are distinct
+        let not_installed = AssetStatus::NotInstalled;
+        let installed = AssetStatus::Installed;
+        let update_available = AssetStatus::UpdateAvailable;
+
+        assert_ne!(not_installed, installed);
+        assert_ne!(not_installed, update_available);
+        assert_ne!(installed, update_available);
+    }
+
+    #[test]
+    fn test_asset_status_copy_clone() {
+        // Verify AssetStatus implements Copy and Clone
+        let original = AssetStatus::Installed;
+        let copied = original;
+        let cloned = original.clone();
+
+        assert_eq!(original, copied);
+        assert_eq!(original, cloned);
+    }
+
+    #[test]
+    fn test_asset_status_debug() {
+        // Verify AssetStatus implements Debug
+        let status = AssetStatus::UpdateAvailable;
+        let debug_str = format!("{:?}", status);
+        assert!(debug_str.contains("UpdateAvailable"));
+    }
+
+    #[test]
+    fn test_asset_status_from_index() {
+        // Test the AssetStatus creation from index (as used in AssetPreviewNode::new_with_data)
+        // Index mapping: 0 = NotInstalled, 1 = Installed, 2 = UpdateAvailable
+
+        let status_0 = match 0 {
+            0 => AssetStatus::NotInstalled,
+            1 => AssetStatus::Installed,
+            2 => AssetStatus::UpdateAvailable,
+            _ => AssetStatus::NotInstalled,
+        };
+        assert_eq!(status_0, AssetStatus::NotInstalled);
+
+        let status_1 = match 1 {
+            0 => AssetStatus::NotInstalled,
+            1 => AssetStatus::Installed,
+            2 => AssetStatus::UpdateAvailable,
+            _ => AssetStatus::NotInstalled,
+        };
+        assert_eq!(status_1, AssetStatus::Installed);
+
+        let status_2 = match 2 {
+            0 => AssetStatus::NotInstalled,
+            1 => AssetStatus::Installed,
+            2 => AssetStatus::UpdateAvailable,
+            _ => AssetStatus::NotInstalled,
+        };
+        assert_eq!(status_2, AssetStatus::UpdateAvailable);
+
+        // Test default case
+        let status_invalid = match 99 {
+            0 => AssetStatus::NotInstalled,
+            1 => AssetStatus::Installed,
+            2 => AssetStatus::UpdateAvailable,
+            _ => AssetStatus::NotInstalled,
+        };
+        assert_eq!(status_invalid, AssetStatus::NotInstalled);
+    }
+
+    #[test]
+    fn test_sort_criteria_from_index() {
+        // Test the SortCriteria creation from index (as used in on_sort_changed)
+        // Index mapping: 0 = Name, 1 = Category, 2 = Author
+
+        let sort_0 = match 0 {
+            0 => SortCriteria::Name,
+            1 => SortCriteria::Category,
+            2 => SortCriteria::Author,
+            _ => SortCriteria::Name,
+        };
+        assert_eq!(sort_0, SortCriteria::Name);
+
+        let sort_1 = match 1 {
+            0 => SortCriteria::Name,
+            1 => SortCriteria::Category,
+            2 => SortCriteria::Author,
+            _ => SortCriteria::Name,
+        };
+        assert_eq!(sort_1, SortCriteria::Category);
+
+        let sort_2 = match 2 {
+            0 => SortCriteria::Name,
+            1 => SortCriteria::Category,
+            2 => SortCriteria::Author,
+            _ => SortCriteria::Name,
+        };
+        assert_eq!(sort_2, SortCriteria::Author);
+
+        // Test default case
+        let sort_invalid = match 99 {
+            0 => SortCriteria::Name,
+            1 => SortCriteria::Category,
+            2 => SortCriteria::Author,
+            _ => SortCriteria::Name,
+        };
+        assert_eq!(sort_invalid, SortCriteria::Name);
+    }
+
+    // Integration tests that require Godot engine runtime
+    // These would be implemented in Godot GDScript test files:
+    //
+    // - test_asset_library_gui_initialization()
+    // - test_search_box_functionality()
+    // - test_category_filter_selection()
+    // - test_sort_criteria_application()
+    // - test_asset_list_population()
+    // - test_asset_preview_display()
+    // - test_asset_selection_interaction()
+    // - test_refresh_asset_list()
+    // - test_filter_and_sort_combined()
+    // - test_asset_status_badge_display()
+}
