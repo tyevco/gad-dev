@@ -222,7 +222,19 @@
 - [x] Add integration tests for download functionality
   - Location: `rust/src/asset_library/download_manager.rs` (lines 612-1008)
   - 21 tests covering DownloadInfo, DownloadManager, queue management, state transitions, pause/resume, and cleanup
-- [ ] Add integration tests for import functionality
+- [x] Add integration tests for import functionality
+  - Location: `rust/src/asset_library/asset_manager.rs` (lines 2020-2773)
+  - 37 comprehensive integration tests covering:
+    - ZIP and tar.gz archive extraction
+    - Asset validation (metadata, content, security)
+    - Complete import workflow (extract, validate, move to final location)
+    - Error handling (nonexistent files, unsupported formats, security violations)
+    - Rollback and cleanup mechanisms
+    - Temporary directory management
+    - Godot integration marker creation
+  - Added `tempfile` dev dependency for test isolation
+  - Created helper functions: create_test_zip(), create_test_tar_gz(), create_valid_metadata()
+  - Fixed godot_print! calls to use conditional debug_print! macro for test compatibility
 - [ ] Add GUI interaction tests
 - [ ] Test cross-platform compatibility (Windows, Linux, macOS)
 
