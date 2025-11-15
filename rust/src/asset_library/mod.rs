@@ -6,6 +6,7 @@ mod godot_asset_library_api;
 mod repository_adapter;
 mod authentication;
 mod health_checker;
+mod download_manager;
 
 pub use asset::{Asset, AssetCategory, AssetDependency, AssetVersionInfo, SemanticVersion};
 pub use asset_manager::AssetManager;
@@ -27,3 +28,4 @@ pub use health_checker::{
     CircuitBreaker, CircuitState, FallbackOrchestrator, HealthCheckResult, HealthChecker,
     HealthHistory, SourceHealthStats as HealthStats,
 };
+pub use download_manager::{DownloadInfo, DownloadManager, DownloadManagerConfig, DownloadStatus};
