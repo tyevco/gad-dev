@@ -71,7 +71,18 @@ pub struct AssetCollection {
 }
 
 impl UserFeatures {
-    /// Creates a new UserFeatures instance
+    /// Creates a new UserFeatures instance with empty data.
+    ///
+    /// # Arguments
+    /// * `data_file` - Path where user features data will be saved
+    ///
+    /// # Returns
+    /// * `Self` - A new UserFeatures instance
+    ///
+    /// # Example
+    /// ```
+    /// let features = UserFeatures::new(PathBuf::from("user://user_features.json"));
+    /// ```
     pub fn new(data_file: PathBuf) -> Self {
         Self {
             favorites: HashSet::new(),
@@ -82,7 +93,24 @@ impl UserFeatures {
         }
     }
 
-    /// Loads user features from disk
+    /// Loads user features from disk.
+    ///
+    /// If the file doesn't exist, returns a new empty instance. This method
+    /// deserializes the JSON data and restores all favorites, ratings, history,
+    /// and collections.
+    ///
+    /// # Arguments
+    /// * `data_file` - Path to the user features data file
+    ///
+    /// # Returns
+    /// * `Ok(UserFeatures)` - Loaded user features or new instance if file doesn't exist
+    /// * `Err(String)` - Error message if file exists but can't be read or parsed
+    ///
+    /// # Example
+    /// ```
+    /// let features = UserFeatures::load(PathBuf::from("user://user_features.json"))?;
+    /// println!("Loaded {} favorites", features.get_favorites().len());
+    /// ```
     pub fn load(data_file: PathBuf) -> Result<Self, String> {
         if !data_file.exists() {
             return Ok(Self::new(data_file));
@@ -98,7 +126,22 @@ impl UserFeatures {
         Ok(features)
     }
 
-    /// Saves user features to disk
+    /// Saves user features to disk.
+    ///
+    /// Serializes all user data (favorites, ratings, history, collections) to
+    /// JSON format and writes it to the data file. Creates the parent directory
+    /// if it doesn't exist.
+    ///
+    /// # Returns
+    /// * `Ok(())` - Data was successfully saved
+    /// * `Err(String)` - Error message if save failed
+    ///
+    /// # Example
+    /// ```
+    /// let mut features = UserFeatures::load(PathBuf::from("user://user_features.json"))?;
+    /// features.add_favorite("asset_123".to_string());
+    /// features.save()?; // Save changes to disk
+    /// ```
     pub fn save(&self) -> Result<(), String> {
         // Create parent directory if needed
         if let Some(parent) = self.data_file.parent() {
@@ -117,7 +160,25 @@ impl UserFeatures {
 
     // ===== Favorites Management =====
 
-    /// Add an asset to favorites
+    /// Adds an asset to the favorites list.
+    ///
+    /// If the asset is already a favorite, this method does nothing and returns false.
+    /// The changes are automatically saved to disk.
+    ///
+    /// # Arguments
+    /// * `asset_id` - The ID of the asset to add to favorites
+    ///
+    /// # Returns
+    /// * `true` - Asset was added to favorites
+    /// * `false` - Asset was already in favorites
+    ///
+    /// # Example
+    /// ```
+    /// let mut features = UserFeatures::new(PathBuf::from("user://user_features.json"));
+    /// if features.add_favorite("asset_123".to_string()) {
+    ///     println!("Added to favorites!");
+    /// }
+    /// ```
     pub fn add_favorite(&mut self, asset_id: String) -> bool {
         let added = self.favorites.insert(asset_id);
         if added {
@@ -268,7 +329,29 @@ impl UserFeatures {
 
     // ===== Collections Management =====
 
-    /// Create a new collection
+    /// Creates a new asset collection.
+    ///
+    /// Collections are groups of related assets that can be managed together.
+    /// They're useful for organizing assets by project, type, or any custom criteria.
+    ///
+    /// # Arguments
+    /// * `id` - Unique identifier for the collection
+    /// * `name` - Display name for the collection
+    /// * `description` - Description of the collection's purpose
+    ///
+    /// # Returns
+    /// * `Ok(())` - Collection was successfully created
+    /// * `Err(String)` - Error if a collection with the same ID already exists
+    ///
+    /// # Example
+    /// ```
+    /// let mut features = UserFeatures::new(PathBuf::from("user://user_features.json"));
+    /// features.create_collection(
+    ///     "my_project".to_string(),
+    ///     "My Game Project".to_string(),
+    ///     "Assets for my RPG game".to_string()
+    /// )?;
+    /// ```
     pub fn create_collection(&mut self, id: String, name: String, description: String) -> Result<(), String> {
         if self.collections.contains_key(&id) {
             return Err(format!("Collection '{}' already exists", id));
@@ -390,7 +473,25 @@ impl UserFeatures {
 
     // ===== Export/Import =====
 
-    /// Export a collection to a shareable format
+    /// Exports a collection to a shareable JSON format.
+    ///
+    /// Creates a JSON representation of the collection that can be shared with
+    /// other users or backed up. The exported data includes the collection name,
+    /// description, asset list, and timestamps.
+    ///
+    /// # Arguments
+    /// * `collection_id` - The ID of the collection to export
+    ///
+    /// # Returns
+    /// * `Ok(String)` - JSON string representation of the collection
+    /// * `Err(String)` - Error if collection not found or serialization failed
+    ///
+    /// # Example
+    /// ```
+    /// let features = UserFeatures::load(PathBuf::from("user://user_features.json"))?;
+    /// let json = features.export_collection("my_project")?;
+    /// std::fs::write("my_collection.json", json)?;
+    /// ```
     pub fn export_collection(&self, collection_id: &str) -> Result<String, String> {
         let collection = self.collections.get(collection_id)
             .ok_or_else(|| format!("Collection '{}' not found", collection_id))?;
@@ -399,7 +500,26 @@ impl UserFeatures {
             .map_err(|e| format!("Failed to serialize collection: {}", e))
     }
 
-    /// Import a collection from a shareable format
+    /// Imports a collection from a JSON string.
+    ///
+    /// Reads a collection that was previously exported and adds it to the user's
+    /// collections. This is useful for sharing collections between users or
+    /// restoring from backups.
+    ///
+    /// # Arguments
+    /// * `id` - Unique ID to assign to the imported collection
+    /// * `json_data` - JSON string containing the collection data
+    ///
+    /// # Returns
+    /// * `Ok(())` - Collection was successfully imported
+    /// * `Err(String)` - Error if collection ID exists, JSON invalid, or save failed
+    ///
+    /// # Example
+    /// ```
+    /// let mut features = UserFeatures::load(PathBuf::from("user://user_features.json"))?;
+    /// let json = std::fs::read_to_string("shared_collection.json")?;
+    /// features.import_collection("imported".to_string(), &json)?;
+    /// ```
     pub fn import_collection(&mut self, id: String, json_data: &str) -> Result<(), String> {
         if self.collections.contains_key(&id) {
             return Err(format!("Collection '{}' already exists", id));

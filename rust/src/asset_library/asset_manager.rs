@@ -20,6 +20,22 @@ pub struct AssetManager {
 }
 
 impl AssetManager {
+    /// Creates a new AssetManager instance with default configuration.
+    ///
+    /// This initializes the asset manager with:
+    /// - HTTP client for downloading assets
+    /// - Asset directory at `res://addons/`
+    /// - Cache directory at `user://asset_cache/`
+    /// - Empty asset and installed assets lists
+    /// - Sample assets for testing (will be removed in production)
+    ///
+    /// # Returns
+    /// * `Self` - A new AssetManager instance
+    ///
+    /// # Example
+    /// ```
+    /// let manager = AssetManager::new();
+    /// ```
     pub fn new() -> Self {
         let mut manager = Self {
             client: Client::new(),
@@ -120,12 +136,34 @@ impl AssetManager {
         ));
     }
 
-    /// Get all assets
+    /// Retrieves all assets from the asset library.
+    ///
+    /// # Returns
+    /// * `Vec<Asset>` - A vector containing all assets
+    ///
+    /// # Example
+    /// ```
+    /// let manager = AssetManager::new();
+    /// let all_assets = manager.get_assets();
+    /// println!("Total assets: {}", all_assets.len());
+    /// ```
     pub fn get_assets(&self) -> Vec<Asset> {
         self.assets.lock().unwrap().clone()
     }
 
-    /// Get assets by category
+    /// Retrieves assets filtered by category.
+    ///
+    /// # Arguments
+    /// * `category` - The category to filter by
+    ///
+    /// # Returns
+    /// * `Vec<Asset>` - A vector containing assets matching the specified category
+    ///
+    /// # Example
+    /// ```
+    /// let manager = AssetManager::new();
+    /// let tools = manager.get_assets_by_category(AssetCategory::Tools);
+    /// ```
     pub fn get_assets_by_category(&self, category: AssetCategory) -> Vec<Asset> {
         self.assets
             .lock()
@@ -136,7 +174,22 @@ impl AssetManager {
             .collect()
     }
 
-    /// Search assets by name or tags
+    /// Searches for assets by name, tags, or description.
+    ///
+    /// Performs a case-insensitive search across asset names, tags, and descriptions.
+    ///
+    /// # Arguments
+    /// * `query` - The search query string
+    ///
+    /// # Returns
+    /// * `Vec<Asset>` - A vector containing assets matching the search query
+    ///
+    /// # Example
+    /// ```
+    /// let manager = AssetManager::new();
+    /// let results = manager.search_assets("shader");
+    /// println!("Found {} assets matching 'shader'", results.len());
+    /// ```
     pub fn search_assets(&self, query: &str) -> Vec<Asset> {
         let query_lower = query.to_lowercase();
         self.assets
@@ -152,7 +205,22 @@ impl AssetManager {
             .collect()
     }
 
-    /// Get an asset by ID
+    /// Retrieves a specific asset by its ID.
+    ///
+    /// # Arguments
+    /// * `id` - The unique identifier of the asset
+    ///
+    /// # Returns
+    /// * `Some(Asset)` - The asset if found
+    /// * `None` - If no asset with the given ID exists
+    ///
+    /// # Example
+    /// ```
+    /// let manager = AssetManager::new();
+    /// if let Some(asset) = manager.get_asset_by_id("asset_123") {
+    ///     println!("Found asset: {}", asset.name);
+    /// }
+    /// ```
     pub fn get_asset_by_id(&self, id: &str) -> Option<Asset> {
         self.assets
             .lock()
@@ -277,17 +345,61 @@ impl AssetManager {
         Ok(final_path)
     }
 
-    /// Checks if an asset is currently installed
+    /// Checks if an asset is currently installed.
+    ///
+    /// # Arguments
+    /// * `asset_id` - The unique identifier of the asset to check
+    ///
+    /// # Returns
+    /// * `true` - If the asset is installed
+    /// * `false` - If the asset is not installed
+    ///
+    /// # Example
+    /// ```
+    /// let manager = AssetManager::new();
+    /// if manager.is_asset_installed("asset_123") {
+    ///     println!("Asset is already installed");
+    /// }
+    /// ```
     pub fn is_asset_installed(&self, asset_id: &str) -> bool {
         self.installed_assets.lock().unwrap().contains(&asset_id.to_string())
     }
 
-    /// Gets a list of all installed asset IDs
+    /// Retrieves a list of all installed asset IDs.
+    ///
+    /// # Returns
+    /// * `Vec<String>` - A vector containing the IDs of all installed assets
+    ///
+    /// # Example
+    /// ```
+    /// let manager = AssetManager::new();
+    /// let installed = manager.get_installed_assets();
+    /// println!("You have {} assets installed", installed.len());
+    /// ```
     pub fn get_installed_assets(&self) -> Vec<String> {
         self.installed_assets.lock().unwrap().clone()
     }
 
-    /// Uninstalls an asset by removing it from the asset directory
+    /// Uninstalls an asset by removing it from the asset directory.
+    ///
+    /// This removes all files associated with the asset and updates the
+    /// installed assets tracking list.
+    ///
+    /// # Arguments
+    /// * `asset_id` - The unique identifier of the asset to uninstall
+    ///
+    /// # Returns
+    /// * `Ok(())` - If the asset was successfully uninstalled
+    /// * `Err(String)` - Error message if the asset is not installed or removal failed
+    ///
+    /// # Example
+    /// ```
+    /// let manager = AssetManager::new();
+    /// match manager.uninstall_asset("asset_123") {
+    ///     Ok(_) => println!("Asset uninstalled successfully"),
+    ///     Err(e) => println!("Failed to uninstall: {}", e),
+    /// }
+    /// ```
     pub fn uninstall_asset(&self, asset_id: &str) -> Result<(), String> {
         let asset_path = PathBuf::from(&self.asset_dir).join(asset_id);
 
@@ -628,9 +740,32 @@ impl AssetManager {
 
     // ===== Advanced Asset Management Features =====
 
-    /// Bulk install multiple assets
+    /// Bulk install multiple assets concurrently.
     ///
-    /// Returns a map of asset_id -> Result indicating success or failure for each
+    /// Installs multiple assets in a batch operation. Each asset is installed independently,
+    /// and the method returns a map showing the result for each asset.
+    ///
+    /// # Arguments
+    /// * `asset_ids` - Vector of asset IDs to install
+    ///
+    /// # Returns
+    /// * `HashMap<String, Result<PathBuf, String>>` - Map of asset ID to installation result
+    ///   - `Ok(PathBuf)` - Path to the installed asset on success
+    ///   - `Err(String)` - Error message if installation failed
+    ///
+    /// # Example
+    /// ```
+    /// let manager = AssetManager::new();
+    /// let ids = vec!["asset1".to_string(), "asset2".to_string()];
+    /// let results = manager.bulk_install(ids).await;
+    ///
+    /// for (id, result) in results {
+    ///     match result {
+    ///         Ok(path) => println!("{} installed at {:?}", id, path),
+    ///         Err(e) => println!("{} failed: {}", id, e),
+    ///     }
+    /// }
+    /// ```
     pub async fn bulk_install(&self, asset_ids: Vec<String>) -> HashMap<String, Result<PathBuf, String>> {
         let mut results = HashMap::new();
 
@@ -643,9 +778,32 @@ impl AssetManager {
         results
     }
 
-    /// Bulk update multiple assets
+    /// Bulk update multiple assets to their latest versions.
     ///
-    /// Only updates assets that have updates available
+    /// Only updates assets that have updates available. Assets without updates
+    /// will have an error result indicating no update is available.
+    ///
+    /// # Arguments
+    /// * `asset_ids` - Vector of asset IDs to update
+    ///
+    /// # Returns
+    /// * `HashMap<String, Result<PathBuf, String>>` - Map of asset ID to update result
+    ///   - `Ok(PathBuf)` - Path to the updated asset on success
+    ///   - `Err(String)` - Error message if update failed or no update available
+    ///
+    /// # Example
+    /// ```
+    /// let manager = AssetManager::new();
+    /// let ids = vec!["asset1".to_string(), "asset2".to_string()];
+    /// let results = manager.bulk_update(ids).await;
+    ///
+    /// for (id, result) in results {
+    ///     match result {
+    ///         Ok(path) => println!("{} updated successfully", id),
+    ///         Err(e) => println!("{}: {}", id, e),
+    ///     }
+    /// }
+    /// ```
     pub async fn bulk_update(&self, asset_ids: Vec<String>) -> HashMap<String, Result<PathBuf, String>> {
         let mut results = HashMap::new();
 
@@ -669,7 +827,32 @@ impl AssetManager {
         results
     }
 
-    /// Bulk uninstall multiple assets
+    /// Bulk uninstall multiple assets.
+    ///
+    /// Removes multiple assets in a batch operation. Each asset is uninstalled
+    /// independently, and the method returns a map showing the result for each asset.
+    ///
+    /// # Arguments
+    /// * `asset_ids` - Vector of asset IDs to uninstall
+    ///
+    /// # Returns
+    /// * `HashMap<String, Result<(), String>>` - Map of asset ID to uninstall result
+    ///   - `Ok(())` - Asset was successfully uninstalled
+    ///   - `Err(String)` - Error message if uninstall failed
+    ///
+    /// # Example
+    /// ```
+    /// let manager = AssetManager::new();
+    /// let ids = vec!["asset1".to_string(), "asset2".to_string()];
+    /// let results = manager.bulk_uninstall(ids);
+    ///
+    /// for (id, result) in results {
+    ///     match result {
+    ///         Ok(_) => println!("{} uninstalled", id),
+    ///         Err(e) => println!("{} failed: {}", id, e),
+    ///     }
+    /// }
+    /// ```
     pub fn bulk_uninstall(&self, asset_ids: Vec<String>) -> HashMap<String, Result<(), String>> {
         let mut results = HashMap::new();
 
@@ -682,9 +865,35 @@ impl AssetManager {
         results
     }
 
-    /// Detect conflicts between assets
+    /// Detects file conflicts between assets.
     ///
-    /// Checks for file path conflicts between installed/to-be-installed assets
+    /// Checks if installing or updating the specified asset would conflict with
+    /// files from other installed assets. This helps prevent overwriting files
+    /// from other assets.
+    ///
+    /// # Arguments
+    /// * `asset_id` - The ID of the asset to check for conflicts
+    ///
+    /// # Returns
+    /// * `Ok(Vec<String>)` - List of conflict messages (empty if no conflicts)
+    /// * `Err(String)` - Error message if conflict detection failed
+    ///
+    /// # Example
+    /// ```
+    /// let manager = AssetManager::new();
+    /// match manager.detect_conflicts("asset_123") {
+    ///     Ok(conflicts) => {
+    ///         if conflicts.is_empty() {
+    ///             println!("No conflicts detected");
+    ///         } else {
+    ///             for conflict in conflicts {
+    ///                 println!("Conflict: {}", conflict);
+    ///             }
+    ///         }
+    ///     }
+    ///     Err(e) => println!("Error: {}", e),
+    /// }
+    /// ```
     pub fn detect_conflicts(&self, asset_id: &str) -> Result<Vec<String>, String> {
         let asset_path = PathBuf::from(&self.asset_dir).join(asset_id);
         let mut conflicts = Vec::new();
@@ -751,9 +960,26 @@ impl AssetManager {
         Ok(files)
     }
 
-    /// Create a backup of an asset before updating
+    /// Creates a backup of an installed asset before updating.
     ///
-    /// Returns the path to the backup directory
+    /// Creates a timestamped backup copy of the asset's directory in the
+    /// cache/backups folder. This allows for safe updates with rollback capability.
+    ///
+    /// # Arguments
+    /// * `asset_id` - The ID of the asset to backup
+    ///
+    /// # Returns
+    /// * `Ok(PathBuf)` - Path to the backup directory
+    /// * `Err(String)` - Error message if the asset is not installed or backup failed
+    ///
+    /// # Example
+    /// ```
+    /// let manager = AssetManager::new();
+    /// match manager.backup_asset("asset_123") {
+    ///     Ok(backup_path) => println!("Backup created at: {:?}", backup_path),
+    ///     Err(e) => println!("Backup failed: {}", e),
+    /// }
+    /// ```
     pub fn backup_asset(&self, asset_id: &str) -> Result<PathBuf, String> {
         let asset_path = PathBuf::from(&self.asset_dir).join(asset_id);
 
@@ -809,7 +1035,28 @@ impl AssetManager {
         Ok(())
     }
 
-    /// Restore an asset from a backup
+    /// Restores an asset from a backup directory.
+    ///
+    /// Removes the current installation and replaces it with the contents
+    /// from the backup. This is typically used after a failed update.
+    ///
+    /// # Arguments
+    /// * `backup_path` - Path to the backup directory
+    /// * `asset_id` - The ID of the asset to restore
+    ///
+    /// # Returns
+    /// * `Ok(())` - Asset was successfully restored
+    /// * `Err(String)` - Error message if restoration failed
+    ///
+    /// # Example
+    /// ```
+    /// let manager = AssetManager::new();
+    /// let backup_path = Path::new("/path/to/backup");
+    /// match manager.restore_from_backup(&backup_path, "asset_123") {
+    ///     Ok(_) => println!("Asset restored successfully"),
+    ///     Err(e) => println!("Restore failed: {}", e),
+    /// }
+    /// ```
     pub fn restore_from_backup(&self, backup_path: &Path, asset_id: &str) -> Result<(), String> {
         let asset_path = PathBuf::from(&self.asset_dir).join(asset_id);
 
@@ -826,9 +1073,33 @@ impl AssetManager {
         Ok(())
     }
 
-    /// Resolve and check dependencies for an asset
+    /// Resolves and checks dependencies for an asset.
     ///
-    /// Returns a list of missing dependencies
+    /// Analyzes the asset's dependency list and returns any dependencies
+    /// that are not currently installed. This helps ensure all required
+    /// assets are installed before installing the requested asset.
+    ///
+    /// # Arguments
+    /// * `asset_id` - The ID of the asset to check dependencies for
+    ///
+    /// # Returns
+    /// * `Ok(Vec<String>)` - List of missing dependency descriptions (empty if all satisfied)
+    /// * `Err(String)` - Error message if the asset is not found
+    ///
+    /// # Example
+    /// ```
+    /// let manager = AssetManager::new();
+    /// match manager.resolve_dependencies("asset_123") {
+    ///     Ok(missing) => {
+    ///         if missing.is_empty() {
+    ///             println!("All dependencies satisfied");
+    ///         } else {
+    ///             println!("Missing dependencies: {:?}", missing);
+    ///         }
+    ///     }
+    ///     Err(e) => println!("Error: {}", e),
+    /// }
+    /// ```
     pub fn resolve_dependencies(&self, asset_id: &str) -> Result<Vec<String>, String> {
         let asset = self.get_asset_by_id(asset_id)
             .ok_or_else(|| format!("Asset '{}' not found", asset_id))?;
@@ -848,9 +1119,32 @@ impl AssetManager {
         Ok(missing)
     }
 
-    /// Install an asset with all its dependencies
+    /// Installs an asset along with all its dependencies.
     ///
-    /// Returns a map of results for the asset and all dependencies
+    /// This method automatically resolves dependencies and installs them in the
+    /// correct order before installing the requested asset. Dependencies are
+    /// installed first to ensure the asset has everything it needs to function.
+    ///
+    /// # Arguments
+    /// * `asset_id` - The ID of the asset to install with dependencies
+    ///
+    /// # Returns
+    /// * `HashMap<String, Result<PathBuf, String>>` - Map of asset/dependency IDs to installation results
+    ///   - Keys include the main asset ID and all dependency IDs
+    ///   - Values are `Ok(PathBuf)` on success or `Err(String)` on failure
+    ///
+    /// # Example
+    /// ```
+    /// let manager = AssetManager::new();
+    /// let results = manager.install_with_dependencies("asset_123".to_string()).await;
+    ///
+    /// for (id, result) in results {
+    ///     match result {
+    ///         Ok(path) => println!("{} installed at {:?}", id, path),
+    ///         Err(e) => println!("{} failed: {}", id, e),
+    ///     }
+    /// }
+    /// ```
     pub async fn install_with_dependencies(&self, asset_id: String) -> HashMap<String, Result<PathBuf, String>> {
         let mut results = HashMap::new();
 
@@ -881,7 +1175,31 @@ impl AssetManager {
         results
     }
 
-    /// Update an asset with automatic backup
+    /// Updates an asset with automatic backup and rollback on failure.
+    ///
+    /// This is the safe way to update an asset. It performs the following steps:
+    /// 1. Creates a backup of the current installation
+    /// 2. Attempts to update the asset
+    /// 3. On failure, automatically restores from the backup
+    ///
+    /// This ensures that even if an update fails, the asset remains in a
+    /// working state.
+    ///
+    /// # Arguments
+    /// * `asset_id` - The ID of the asset to update
+    ///
+    /// # Returns
+    /// * `Ok(PathBuf)` - Path to the updated asset on success
+    /// * `Err(String)` - Error message if update and/or rollback failed
+    ///
+    /// # Example
+    /// ```
+    /// let manager = AssetManager::new();
+    /// match manager.update_asset_with_backup("asset_123".to_string()).await {
+    ///     Ok(path) => println!("Asset updated successfully at {:?}", path),
+    ///     Err(e) => println!("Update failed: {}", e),
+    /// }
+    /// ```
     pub async fn update_asset_with_backup(&self, asset_id: String) -> Result<PathBuf, String> {
         // Create backup first
         match self.backup_asset(&asset_id) {
