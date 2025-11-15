@@ -339,6 +339,136 @@ impl AssetManager {
         self.assets.lock().unwrap().len()
     }
 
+    // ===== Memory-Optimized Access Methods =====
+
+    /// Provides read-only access to assets through a closure without cloning.
+    ///
+    /// This method allows you to work with asset data without creating copies,
+    /// significantly reducing memory allocations for read-only operations.
+    ///
+    /// # Arguments
+    /// * `f` - A closure that receives a reference to the asset slice
+    ///
+    /// # Returns
+    /// * `R` - The return value of the closure
+    ///
+    /// # Performance
+    /// Zero-copy access to asset data. Ideal for:
+    /// - Counting/statistics
+    /// - Existence checks
+    /// - Read-only iteration
+    /// - Data extraction without modification
+    ///
+    /// # Example
+    /// ```
+    /// let manager = AssetManager::new();
+    ///
+    /// // Count assets without cloning
+    /// let count = manager.with_assets(|assets| assets.len());
+    ///
+    /// // Find asset by ID without cloning
+    /// let exists = manager.with_assets(|assets| {
+    ///     assets.iter().any(|a| a.id == "asset_123")
+    /// });
+    ///
+    /// // Extract specific field
+    /// let names = manager.with_assets(|assets| {
+    ///     assets.iter().map(|a| a.name.clone()).collect::<Vec<_>>()
+    /// });
+    /// ```
+    pub fn with_assets<F, R>(&self, f: F) -> R
+    where
+        F: FnOnce(&[Asset]) -> R,
+    {
+        let assets = self.assets.lock().unwrap();
+        f(&assets)
+    }
+
+    /// Gets only the IDs of all assets (minimal memory footprint).
+    ///
+    /// Returns a vector of asset IDs without cloning the full Asset structs.
+    /// Useful when you only need to know which assets exist.
+    ///
+    /// # Returns
+    /// * `Vec<String>` - Vector of asset IDs
+    ///
+    /// # Performance
+    /// Only clones ID strings, not entire Asset structs.
+    /// Memory usage: ~50 bytes per asset vs ~500+ bytes for full Asset.
+    ///
+    /// # Example
+    /// ```
+    /// let manager = AssetManager::new();
+    /// let asset_ids = manager.get_asset_ids();
+    /// println!("Have {} assets", asset_ids.len());
+    /// ```
+    pub fn get_asset_ids(&self) -> Vec<String> {
+        self.assets
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|asset| asset.id.clone())
+            .collect()
+    }
+
+    /// Gets asset IDs filtered by category (minimal memory).
+    ///
+    /// # Arguments
+    /// * `category` - The category to filter by
+    ///
+    /// # Returns
+    /// * `Vec<String>` - Vector of asset IDs in the category
+    ///
+    /// # Performance
+    /// Only clones ID strings for matching assets.
+    pub fn get_asset_ids_by_category(&self, category: AssetCategory) -> Vec<String> {
+        self.assets
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|asset| asset.category == category)
+            .map(|asset| asset.id.clone())
+            .collect()
+    }
+
+    /// Checks if an asset exists by ID (zero allocation).
+    ///
+    /// # Arguments
+    /// * `id` - The asset ID to check
+    ///
+    /// # Returns
+    /// * `bool` - true if asset exists, false otherwise
+    ///
+    /// # Performance
+    /// No allocations - just iterates and compares.
+    /// Faster than get_asset_by_id() when you only need existence check.
+    pub fn has_asset(&self, id: &str) -> bool {
+        self.assets
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|asset| asset.id == id)
+    }
+
+    /// Gets count of assets by category (zero allocation).
+    ///
+    /// # Arguments
+    /// * `category` - The category to count
+    ///
+    /// # Returns
+    /// * `usize` - Number of assets in that category
+    ///
+    /// # Performance
+    /// No allocations - just counts matching items.
+    pub fn count_assets_by_category(&self, category: AssetCategory) -> usize {
+        self.assets
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|asset| asset.category == category)
+            .count()
+    }
+
     /// Retrieves a specific asset by its ID.
     ///
     /// # Arguments
@@ -3287,5 +3417,247 @@ mod tests {
 
         // Search should complete quickly (< 10ms for ~100 assets)
         assert!(duration.as_millis() < 100, "Search took {:?}, expected < 100ms", duration);
+    }
+
+    // ===== Memory Optimization Tests =====
+
+    #[test]
+    fn test_with_assets_zero_copy() {
+        let manager = AssetManager::new();
+
+        // Use with_assets for read-only access
+        let count = manager.with_assets(|assets| assets.len());
+        assert_eq!(count, 5); // 5 sample assets
+
+        // Find asset by ID without cloning
+        let exists = manager.with_assets(|assets| {
+            assets.iter().any(|a| a.id == "1")
+        });
+        assert!(exists);
+
+        // Extract specific fields
+        let names = manager.with_assets(|assets| {
+            assets.iter().map(|a| a.name.clone()).collect::<Vec<_>>()
+        });
+        assert_eq!(names.len(), 5);
+        assert!(names.iter().any(|n| n == "Awesome 2D Sprites"));
+    }
+
+    #[test]
+    fn test_get_asset_ids_minimal_memory() {
+        let manager = AssetManager::new();
+
+        // Get only IDs instead of full assets
+        let ids = manager.get_asset_ids();
+        assert_eq!(ids.len(), 5);
+        assert!(ids.contains(&"1".to_string()));
+        assert!(ids.contains(&"2".to_string()));
+        assert!(ids.contains(&"3".to_string()));
+
+        // IDs should match the full asset list
+        let full_ids = manager.get_assets()
+            .iter()
+            .map(|a| a.id.clone())
+            .collect::<Vec<_>>();
+        assert_eq!(ids, full_ids);
+    }
+
+    #[test]
+    fn test_get_asset_ids_by_category() {
+        let manager = AssetManager::new();
+
+        // Get IDs for 2D category
+        let ids_2d = manager.get_asset_ids_by_category(AssetCategory::TwoD);
+        assert_eq!(ids_2d.len(), 1);
+        assert!(ids_2d.contains(&"1".to_string()));
+
+        // Get IDs for Scripts category
+        let ids_scripts = manager.get_asset_ids_by_category(AssetCategory::Scripts);
+        assert_eq!(ids_scripts.len(), 1);
+        assert!(ids_scripts.contains(&"5".to_string()));
+
+        // Get IDs for category with no assets
+        let ids_tools = manager.get_asset_ids_by_category(AssetCategory::Tools);
+        assert_eq!(ids_tools.len(), 0);
+    }
+
+    #[test]
+    fn test_has_asset_zero_allocation() {
+        let manager = AssetManager::new();
+
+        // Check existing assets
+        assert!(manager.has_asset("1"));
+        assert!(manager.has_asset("2"));
+        assert!(manager.has_asset("3"));
+        assert!(manager.has_asset("4"));
+        assert!(manager.has_asset("5"));
+
+        // Check non-existent asset
+        assert!(!manager.has_asset("999"));
+        assert!(!manager.has_asset("nonexistent"));
+    }
+
+    #[test]
+    fn test_count_assets_by_category() {
+        let manager = AssetManager::new();
+
+        // Count assets in different categories
+        assert_eq!(manager.count_assets_by_category(AssetCategory::TwoD), 1);
+        assert_eq!(manager.count_assets_by_category(AssetCategory::ThreeD), 1);
+        assert_eq!(manager.count_assets_by_category(AssetCategory::Shaders), 1);
+        assert_eq!(manager.count_assets_by_category(AssetCategory::Audio), 1);
+        assert_eq!(manager.count_assets_by_category(AssetCategory::Scripts), 1);
+        assert_eq!(manager.count_assets_by_category(AssetCategory::Tools), 0);
+
+        // Total should match
+        let total: usize = AssetCategory::all()
+            .iter()
+            .map(|cat| manager.count_assets_by_category(*cat))
+            .sum();
+        assert_eq!(total, 5);
+    }
+
+    #[test]
+    fn test_memory_efficiency_comparison() {
+        use std::time::Instant;
+
+        let manager = AssetManager::new();
+
+        // Add 100 assets
+        for i in 0..100 {
+            let asset = Asset::new(
+                format!("mem_test_{}", i),
+                format!("Memory Test Asset {}", i),
+                AssetCategory::TwoD,
+                "".to_string(),
+                "TestAuthor".to_string(),
+                "1.0.0".to_string(),
+                "Test description".to_string(),
+                vec!["test".to_string()],
+                None,
+                "https://example.com/test.zip".to_string(),
+                vec![],
+                vec![],
+            );
+            manager.add_asset(asset);
+        }
+
+        // Benchmark get_assets() (clones everything)
+        let start = Instant::now();
+        let _full = manager.get_assets();
+        let duration_full = start.elapsed();
+
+        // Benchmark get_asset_ids() (minimal cloning)
+        let start = Instant::now();
+        let _ids = manager.get_asset_ids();
+        let duration_ids = start.elapsed();
+
+        // Benchmark with_assets() (zero copy for count)
+        let start = Instant::now();
+        let _count = manager.with_assets(|assets| assets.len());
+        let duration_zero_copy = start.elapsed();
+
+        // IDs should be faster than full clone
+        // (exact timing varies, but IDs should be at least 2x faster)
+        println!("Full clone: {:?}, IDs only: {:?}, Zero-copy: {:?}",
+                 duration_full, duration_ids, duration_zero_copy);
+
+        // Zero-copy should be fastest
+        assert!(duration_zero_copy <= duration_ids);
+        assert!(duration_ids <= duration_full);
+    }
+
+    #[test]
+    fn test_with_assets_closure_flexibility() {
+        let manager = AssetManager::new();
+
+        // Test various closure patterns
+
+        // 1. Simple count
+        let count = manager.with_assets(|assets| assets.len());
+        assert_eq!(count, 5);
+
+        // 2. Complex filtering without cloning
+        let shader_count = manager.with_assets(|assets| {
+            assets.iter()
+                .filter(|a| a.category == AssetCategory::Shaders)
+                .count()
+        });
+        assert_eq!(shader_count, 1);
+
+        // 3. Extracting multiple fields
+        let info = manager.with_assets(|assets| {
+            assets.iter()
+                .map(|a| (a.id.clone(), a.category))
+                .collect::<Vec<_>>()
+        });
+        assert_eq!(info.len(), 5);
+
+        // 4. Boolean check
+        let has_shaders = manager.with_assets(|assets| {
+            assets.iter().any(|a| a.category == AssetCategory::Shaders)
+        });
+        assert!(has_shaders);
+
+        // 5. Find specific asset
+        let shader_name = manager.with_assets(|assets| {
+            assets.iter()
+                .find(|a| a.category == AssetCategory::Shaders)
+                .map(|a| a.name.clone())
+        });
+        assert_eq!(shader_name, Some("Shader Pack Pro".to_string()));
+    }
+
+    #[test]
+    fn test_memory_optimization_with_large_dataset() {
+        let manager = AssetManager::new();
+
+        // Add 1000 test assets
+        for i in 0..1000 {
+            let asset = Asset::new(
+                format!("asset_{}", i),
+                format!("Asset {}", i),
+                match i % 5 {
+                    0 => AssetCategory::TwoD,
+                    1 => AssetCategory::ThreeD,
+                    2 => AssetCategory::Shaders,
+                    3 => AssetCategory::Audio,
+                    _ => AssetCategory::Scripts,
+                },
+                "".to_string(),
+                format!("Author{}", i % 10),
+                "1.0.0".to_string(),
+                "Description".to_string(),
+                vec!["test".to_string()],
+                None,
+                "https://example.com/test.zip".to_string(),
+                vec![],
+                vec![],
+            );
+            manager.add_asset(asset);
+        }
+
+        // Verify count
+        assert_eq!(manager.get_asset_count(), 1005); // 5 sample + 1000 test
+
+        // Use zero-copy methods for statistics
+        let categories_count = manager.with_assets(|assets| {
+            let mut counts = std::collections::HashMap::new();
+            for asset in assets {
+                *counts.entry(asset.category).or_insert(0) += 1;
+            }
+            counts
+        });
+
+        // Verify category counts
+        assert!(categories_count.len() > 0);
+
+        // Verify has_asset is fast
+        assert!(manager.has_asset("asset_500"));
+        assert!(!manager.has_asset("asset_9999"));
+
+        // Verify count by category
+        let twod_count = manager.count_assets_by_category(AssetCategory::TwoD);
+        assert!(twod_count > 0);
     }
 }
