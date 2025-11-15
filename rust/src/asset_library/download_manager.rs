@@ -173,7 +173,29 @@ impl DownloadManager {
         }
     }
 
-    /// Adds a download to the queue
+    /// Adds a download to the queue.
+    ///
+    /// Creates a new download entry in the queued state. The download must be
+    /// explicitly started using `start_download()`.
+    ///
+    /// # Arguments
+    /// * `id` - Unique identifier for this download
+    /// * `url` - URL to download from
+    /// * `destination` - Path where the file should be saved
+    ///
+    /// # Returns
+    /// * `Ok(())` - Download was successfully queued
+    /// * `Err(String)` - Error if a download with the same ID already exists
+    ///
+    /// # Example
+    /// ```
+    /// let manager = DownloadManager::new();
+    /// manager.queue_download(
+    ///     "asset_123".to_string(),
+    ///     "https://example.com/asset.zip".to_string(),
+    ///     PathBuf::from("/path/to/save/asset.zip")
+    /// )?;
+    /// ```
     pub fn queue_download(&self, id: String, url: String, destination: PathBuf) -> Result<(), String> {
         let mut downloads = self.downloads.lock().unwrap();
 
@@ -189,7 +211,32 @@ impl DownloadManager {
         Ok(())
     }
 
-    /// Starts a queued download
+    /// Starts a queued or paused download.
+    ///
+    /// Begins downloading the file from the URL to the destination path.
+    /// The download runs asynchronously in the background. Use `get_download_info()`
+    /// to check progress.
+    ///
+    /// Downloads are subject to the concurrent download limit configured in
+    /// `DownloadManagerConfig::max_concurrent`.
+    ///
+    /// # Arguments
+    /// * `id` - Unique identifier of the download to start
+    ///
+    /// # Returns
+    /// * `Ok(())` - Download was successfully started
+    /// * `Err(String)` - Error if download not found or not in queued/paused state
+    ///
+    /// # Example
+    /// ```
+    /// let manager = DownloadManager::new();
+    /// manager.queue_download(
+    ///     "asset_123".to_string(),
+    ///     "https://example.com/asset.zip".to_string(),
+    ///     PathBuf::from("/path/to/save/asset.zip")
+    /// )?;
+    /// manager.start_download("asset_123".to_string()).await?;
+    /// ```
     pub async fn start_download(&self, id: String) -> Result<(), String> {
         // Get download info
         let (url, destination) = {
@@ -368,7 +415,25 @@ impl DownloadManager {
         Ok(())
     }
 
-    /// Pauses an active download
+    /// Pauses an active download.
+    ///
+    /// The download can be resumed later using `start_download()`. Downloaded
+    /// progress is preserved.
+    ///
+    /// # Arguments
+    /// * `id` - Unique identifier of the download to pause
+    ///
+    /// # Returns
+    /// * `Ok(())` - Download was successfully paused
+    /// * `Err(String)` - Error if download not found or not in progress
+    ///
+    /// # Example
+    /// ```
+    /// let manager = DownloadManager::new();
+    /// manager.pause_download("asset_123")?;
+    /// // Later...
+    /// manager.start_download("asset_123".to_string()).await?;
+    /// ```
     pub fn pause_download(&self, id: &str) -> Result<(), String> {
         let mut downloads = self.downloads.lock().unwrap();
         let info = downloads.get_mut(id)
@@ -382,7 +447,23 @@ impl DownloadManager {
         Ok(())
     }
 
-    /// Cancels a download
+    /// Cancels a download and aborts the download task.
+    ///
+    /// The download is stopped and cannot be resumed. To start the download
+    /// again, you must queue it again.
+    ///
+    /// # Arguments
+    /// * `id` - Unique identifier of the download to cancel
+    ///
+    /// # Returns
+    /// * `Ok(())` - Download was successfully cancelled
+    /// * `Err(String)` - Error if download not found
+    ///
+    /// # Example
+    /// ```
+    /// let manager = DownloadManager::new();
+    /// manager.cancel_download("asset_123")?;
+    /// ```
     pub fn cancel_download(&self, id: &str) -> Result<(), String> {
         let mut downloads = self.downloads.lock().unwrap();
         let info = downloads.get_mut(id)
@@ -398,17 +479,59 @@ impl DownloadManager {
         Ok(())
     }
 
-    /// Gets information about a download
+    /// Retrieves information about a specific download.
+    ///
+    /// Returns a snapshot of the download's current state including progress,
+    /// status, speed, and ETA.
+    ///
+    /// # Arguments
+    /// * `id` - Unique identifier of the download
+    ///
+    /// # Returns
+    /// * `Some(DownloadInfo)` - Download information if found
+    /// * `None` - If no download with the given ID exists
+    ///
+    /// # Example
+    /// ```
+    /// let manager = DownloadManager::new();
+    /// if let Some(info) = manager.get_download_info("asset_123") {
+    ///     println!("Progress: {:.1}%", info.progress_percent());
+    ///     println!("Speed: {} bytes/sec", info.speed_bps);
+    /// }
+    /// ```
     pub fn get_download_info(&self, id: &str) -> Option<DownloadInfo> {
         self.downloads.lock().unwrap().get(id).cloned()
     }
 
-    /// Gets information about all downloads
+    /// Retrieves information about all downloads.
+    ///
+    /// Returns a vector containing information about all downloads, regardless
+    /// of their status.
+    ///
+    /// # Returns
+    /// * `Vec<DownloadInfo>` - Vector of all download information
+    ///
+    /// # Example
+    /// ```
+    /// let manager = DownloadManager::new();
+    /// let all = manager.get_all_downloads();
+    /// println!("Total downloads: {}", all.len());
+    /// ```
     pub fn get_all_downloads(&self) -> Vec<DownloadInfo> {
         self.downloads.lock().unwrap().values().cloned().collect()
     }
 
-    /// Gets active downloads
+    /// Retrieves information about currently active (in-progress) downloads.
+    ///
+    /// # Returns
+    /// * `Vec<DownloadInfo>` - Vector of active download information
+    ///
+    /// # Example
+    /// ```
+    /// let manager = DownloadManager::new();
+    /// let active = manager.get_active_downloads();
+    /// println!("{} downloads in progress", active.len());
+    /// ```
     pub fn get_active_downloads(&self) -> Vec<DownloadInfo> {
         self.downloads
             .lock()
@@ -419,7 +542,17 @@ impl DownloadManager {
             .collect()
     }
 
-    /// Gets queued downloads
+    /// Retrieves information about queued downloads.
+    ///
+    /// # Returns
+    /// * `Vec<DownloadInfo>` - Vector of queued download information
+    ///
+    /// # Example
+    /// ```
+    /// let manager = DownloadManager::new();
+    /// let queued = manager.get_queued_downloads();
+    /// println!("{} downloads waiting", queued.len());
+    /// ```
     pub fn get_queued_downloads(&self) -> Vec<DownloadInfo> {
         self.downloads
             .lock()
@@ -430,7 +563,24 @@ impl DownloadManager {
             .collect()
     }
 
-    /// Removes a completed or failed download from the list
+    /// Removes a completed or failed download from the tracking list.
+    ///
+    /// This cleans up completed or failed downloads to free memory. Active
+    /// downloads cannot be removed and must be cancelled first.
+    ///
+    /// # Arguments
+    /// * `id` - Unique identifier of the download to remove
+    ///
+    /// # Returns
+    /// * `Ok(())` - Download was successfully removed
+    /// * `Err(String)` - Error if download not found or still active
+    ///
+    /// # Example
+    /// ```
+    /// let manager = DownloadManager::new();
+    /// // After download completes
+    /// manager.remove_download("asset_123")?;
+    /// ```
     pub fn remove_download(&self, id: &str) -> Result<(), String> {
         let mut downloads = self.downloads.lock().unwrap();
         let info = downloads.get(id)
