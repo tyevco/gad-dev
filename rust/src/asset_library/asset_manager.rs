@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -623,6 +624,291 @@ impl AssetManager {
     pub fn remove_asset(&self, asset_id: &str) {
         let mut assets = self.assets.lock().unwrap();
         assets.retain(|a| a.id != asset_id);
+    }
+
+    // ===== Advanced Asset Management Features =====
+
+    /// Bulk install multiple assets
+    ///
+    /// Returns a map of asset_id -> Result indicating success or failure for each
+    pub async fn bulk_install(&self, asset_ids: Vec<String>) -> HashMap<String, Result<PathBuf, String>> {
+        let mut results = HashMap::new();
+
+        for asset_id in asset_ids {
+            godot_print!("Bulk install: processing {}", asset_id);
+            let result = self.import_asset(asset_id.clone()).await;
+            results.insert(asset_id, result);
+        }
+
+        results
+    }
+
+    /// Bulk update multiple assets
+    ///
+    /// Only updates assets that have updates available
+    pub async fn bulk_update(&self, asset_ids: Vec<String>) -> HashMap<String, Result<PathBuf, String>> {
+        let mut results = HashMap::new();
+
+        for asset_id in asset_ids {
+            // Check if update is available
+            match self.check_for_update(&asset_id) {
+                Ok(Some(_)) => {
+                    godot_print!("Bulk update: updating {}", asset_id);
+                    let result = self.update_asset(asset_id.clone()).await;
+                    results.insert(asset_id, result);
+                }
+                Ok(None) => {
+                    results.insert(asset_id, Err("No update available".to_string()));
+                }
+                Err(e) => {
+                    results.insert(asset_id, Err(format!("Update check failed: {}", e)));
+                }
+            }
+        }
+
+        results
+    }
+
+    /// Bulk uninstall multiple assets
+    pub fn bulk_uninstall(&self, asset_ids: Vec<String>) -> HashMap<String, Result<(), String>> {
+        let mut results = HashMap::new();
+
+        for asset_id in asset_ids {
+            godot_print!("Bulk uninstall: removing {}", asset_id);
+            let result = self.uninstall_asset(&asset_id);
+            results.insert(asset_id, result);
+        }
+
+        results
+    }
+
+    /// Detect conflicts between assets
+    ///
+    /// Checks for file path conflicts between installed/to-be-installed assets
+    pub fn detect_conflicts(&self, asset_id: &str) -> Result<Vec<String>, String> {
+        let asset_path = PathBuf::from(&self.asset_dir).join(asset_id);
+        let mut conflicts = Vec::new();
+
+        if !asset_path.exists() {
+            return Ok(conflicts);
+        }
+
+        // Get all files in this asset
+        let asset_files = self.get_asset_files(&asset_path)?;
+
+        // Check against other installed assets
+        let installed = self.get_installed_assets();
+        for other_id in installed {
+            if other_id == asset_id {
+                continue; // Skip self
+            }
+
+            let other_path = PathBuf::from(&self.asset_dir).join(&other_id);
+            if other_path.exists() {
+                let other_files = self.get_asset_files(&other_path)?;
+
+                // Find file path overlaps
+                for file in &asset_files {
+                    if other_files.contains(file) {
+                        conflicts.push(format!(
+                            "File conflict with '{}': {}",
+                            other_id,
+                            file.display()
+                        ));
+                    }
+                }
+            }
+        }
+
+        Ok(conflicts)
+    }
+
+    /// Get all files in an asset directory (recursive)
+    fn get_asset_files(&self, asset_dir: &Path) -> Result<Vec<PathBuf>, String> {
+        let mut files = Vec::new();
+
+        if !asset_dir.exists() {
+            return Ok(files);
+        }
+
+        let entries = fs::read_dir(asset_dir)
+            .map_err(|e| format!("Failed to read asset directory: {}", e))?;
+
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_file() {
+                // Store relative path
+                if let Ok(rel_path) = path.strip_prefix(asset_dir) {
+                    files.push(rel_path.to_path_buf());
+                }
+            } else if path.is_dir() {
+                // Recursively get files from subdirectories
+                let subdir_files = self.get_asset_files(&path)?;
+                files.extend(subdir_files);
+            }
+        }
+
+        Ok(files)
+    }
+
+    /// Create a backup of an asset before updating
+    ///
+    /// Returns the path to the backup directory
+    pub fn backup_asset(&self, asset_id: &str) -> Result<PathBuf, String> {
+        let asset_path = PathBuf::from(&self.asset_dir).join(asset_id);
+
+        if !asset_path.exists() {
+            return Err(format!("Asset '{}' is not installed", asset_id));
+        }
+
+        // Create backup directory with timestamp
+        use std::time::SystemTime;
+        let timestamp = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+
+        let backup_dir = PathBuf::from(&self.cache_dir)
+            .join("backups")
+            .join(format!("{}_{}", asset_id, timestamp));
+
+        // Create backup parent directory
+        if let Some(parent) = backup_dir.parent() {
+            fs::create_dir_all(parent)
+                .map_err(|e| format!("Failed to create backup directory: {}", e))?;
+        }
+
+        // Copy asset directory to backup location
+        self.copy_dir_recursive(&asset_path, &backup_dir)?;
+
+        godot_print!("Backed up '{}' to: {:?}", asset_id, backup_dir);
+        Ok(backup_dir)
+    }
+
+    /// Recursively copy a directory
+    fn copy_dir_recursive(&self, src: &Path, dst: &Path) -> Result<(), String> {
+        fs::create_dir_all(dst)
+            .map_err(|e| format!("Failed to create destination directory: {}", e))?;
+
+        let entries = fs::read_dir(src)
+            .map_err(|e| format!("Failed to read source directory: {}", e))?;
+
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let file_name = path.file_name().unwrap();
+            let dst_path = dst.join(file_name);
+
+            if path.is_dir() {
+                self.copy_dir_recursive(&path, &dst_path)?;
+            } else {
+                fs::copy(&path, &dst_path)
+                    .map_err(|e| format!("Failed to copy file {:?}: {}", path, e))?;
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Restore an asset from a backup
+    pub fn restore_from_backup(&self, backup_path: &Path, asset_id: &str) -> Result<(), String> {
+        let asset_path = PathBuf::from(&self.asset_dir).join(asset_id);
+
+        // Remove current installation if exists
+        if asset_path.exists() {
+            fs::remove_dir_all(&asset_path)
+                .map_err(|e| format!("Failed to remove current installation: {}", e))?;
+        }
+
+        // Restore from backup
+        self.copy_dir_recursive(backup_path, &asset_path)?;
+
+        godot_print!("Restored '{}' from backup: {:?}", asset_id, backup_path);
+        Ok(())
+    }
+
+    /// Resolve and check dependencies for an asset
+    ///
+    /// Returns a list of missing dependencies
+    pub fn resolve_dependencies(&self, asset_id: &str) -> Result<Vec<String>, String> {
+        let asset = self.get_asset_by_id(asset_id)
+            .ok_or_else(|| format!("Asset '{}' not found", asset_id))?;
+
+        let mut missing = Vec::new();
+
+        for dependency in &asset.dependencies {
+            if !self.is_asset_installed(&dependency.asset_id) {
+                missing.push(format!(
+                    "{} (version: {})",
+                    dependency.asset_id,
+                    dependency.version_requirement
+                ));
+            }
+        }
+
+        Ok(missing)
+    }
+
+    /// Install an asset with all its dependencies
+    ///
+    /// Returns a map of results for the asset and all dependencies
+    pub async fn install_with_dependencies(&self, asset_id: String) -> HashMap<String, Result<PathBuf, String>> {
+        let mut results = HashMap::new();
+
+        // Check dependencies first
+        let dependencies = match self.resolve_dependencies(&asset_id) {
+            Ok(deps) => deps,
+            Err(e) => {
+                results.insert(asset_id, Err(format!("Failed to resolve dependencies: {}", e)));
+                return results;
+            }
+        };
+
+        // Install missing dependencies first
+        for dep in dependencies {
+            // Extract just the ID (before version requirement)
+            let dep_id = dep.split_whitespace().next().unwrap_or(&dep).to_string();
+
+            godot_print!("Installing dependency: {}", dep_id);
+            let result = self.import_asset(dep_id.clone()).await;
+            results.insert(dep_id, result);
+        }
+
+        // Install the main asset
+        godot_print!("Installing main asset: {}", asset_id);
+        let result = self.import_asset(asset_id.clone()).await;
+        results.insert(asset_id, result);
+
+        results
+    }
+
+    /// Update an asset with automatic backup
+    pub async fn update_asset_with_backup(&self, asset_id: String) -> Result<PathBuf, String> {
+        // Create backup first
+        match self.backup_asset(&asset_id) {
+            Ok(backup_path) => {
+                godot_print!("Created backup at: {:?}", backup_path);
+
+                // Attempt update
+                match self.update_asset(asset_id.clone()).await {
+                    Ok(path) => Ok(path),
+                    Err(e) => {
+                        // Restore from backup on failure
+                        godot_print!("Update failed, restoring from backup...");
+                        if let Err(restore_err) = self.restore_from_backup(&backup_path, &asset_id) {
+                            Err(format!(
+                                "Update failed: {}. Restore also failed: {}",
+                                e, restore_err
+                            ))
+                        } else {
+                            Err(format!("Update failed (restored from backup): {}", e))
+                        }
+                    }
+                }
+            }
+            Err(e) => {
+                Err(format!("Failed to create backup before update: {}", e))
+            }
+        }
     }
 }
 
