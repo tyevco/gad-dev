@@ -11,7 +11,7 @@
 
 ### 1.1 Asset Data Structures
 - [x] Implement complete Asset struct with metadata fields (author, version, description, tags, preview_url, download_url)
-- [ ] Add asset category/type enum (Models, Textures, Scripts, Audio, etc.)
+- [x] Add asset category/type enum (Models, Textures, Scripts, Audio, etc.)
 - [ ] Implement asset dependency tracking
 - [ ] Add asset version management structures
 
