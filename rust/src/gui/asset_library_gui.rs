@@ -1,32 +1,166 @@
-use godot::classes::{Control, GridContainer, IControl, Label, Tree, VBoxContainer};
+use godot::classes::{Control, GridContainer, HBoxContainer, IControl, Label, LineEdit, OptionButton, Tree, VBoxContainer};
 use godot::prelude::*;
+use godot::builtin::Array;
+use crate::asset_library::{AssetManager, AssetCategory};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SortCriteria {
+    Name,
+    Category,
+    Author,
+}
 
 #[derive(GodotClass)]
-#[class(tool, init, base=Control)]
+#[class(tool, base=Control)]
 pub struct AssetLibraryGUI {
     #[base]
     base: Base<Control>,
     vbox: Option<Gd<VBoxContainer>>,
+    search_box: Option<Gd<LineEdit>>,
+    category_filter: Option<Gd<OptionButton>>,
+    sort_by: Option<Gd<OptionButton>>,
     asset_list: Option<Gd<Tree>>,
     asset_preview: Option<Gd<GridContainer>>,
+    asset_manager: AssetManager,
+    current_search_query: String,
+    current_category_filter: Option<AssetCategory>,
+    current_sort_criteria: SortCriteria,
 }
 
 #[godot_api]
 impl AssetLibraryGUI {
     #[func]
+    fn on_search_changed(&mut self, new_text: GString) {
+        self.current_search_query = new_text.to_string();
+        self.refresh_asset_list();
+    }
+
+    #[func]
+    fn on_category_changed(&mut self, index: i32) {
+        // Index 0 is "All Categories" (None filter)
+        // Indices 1+ correspond to AssetCategory variants
+        if index == 0 {
+            self.current_category_filter = None;
+        } else {
+            let categories = AssetCategory::all();
+            if let Some(category) = categories.get((index - 1) as usize) {
+                self.current_category_filter = Some(*category);
+            }
+        }
+        self.refresh_asset_list();
+    }
+
+    #[func]
+    fn on_sort_changed(&mut self, index: i32) {
+        self.current_sort_criteria = match index {
+            0 => SortCriteria::Name,
+            1 => SortCriteria::Category,
+            2 => SortCriteria::Author,
+            _ => SortCriteria::Name,
+        };
+        self.refresh_asset_list();
+    }
+
+    fn refresh_asset_list(&mut self) {
+        if let Some(mut list) = self.asset_list.clone() {
+            // Clear existing items
+            list.clear();
+
+            // Create root
+            let root = list.create_item();
+
+            // Get filtered assets
+            let mut assets = if self.current_search_query.is_empty() {
+                if let Some(category) = self.current_category_filter {
+                    self.asset_manager.get_assets_by_category(category)
+                } else {
+                    self.asset_manager.get_assets()
+                }
+            } else {
+                let mut filtered = self.asset_manager.search_assets(&self.current_search_query);
+
+                // Further filter by category if one is selected
+                if let Some(category) = self.current_category_filter {
+                    filtered.retain(|asset| asset.category == category);
+                }
+
+                filtered
+            };
+
+            // Sort assets based on current sort criteria
+            match self.current_sort_criteria {
+                SortCriteria::Name => {
+                    assets.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+                }
+                SortCriteria::Category => {
+                    assets.sort_by(|a, b| {
+                        a.category
+                            .display_name()
+                            .cmp(b.category.display_name())
+                            .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+                    });
+                }
+                SortCriteria::Author => {
+                    assets.sort_by(|a, b| {
+                        a.author
+                            .to_lowercase()
+                            .cmp(&b.author.to_lowercase())
+                            .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+                    });
+                }
+            }
+
+            // Populate tree with filtered and sorted assets
+            for asset in assets {
+                if let Some(mut item) = list.create_item_ex().parent(root.clone()).done() {
+                    item.set_text(0, asset.name.clone().into());
+                    item.set_text(1, asset.category.display_name().into());
+                    item.set_text(2, asset.author.clone().into());
+                    item.set_metadata(0, asset.id.to_variant());
+                }
+            }
+        }
+    }
+
+    #[func]
     fn on_asset_selected(&mut self) {
-        godot_print!("Godot Asset selected");
+        godot_print!("Asset selected");
         if let Some(list) = &self.asset_list {
             let selected_item = list.get_selected();
 
             if let Some(mut preview) = self.asset_preview.clone() {
+                // Clear existing preview items
                 let children = preview.get_children();
+                for i in 0..children.len() {
+                    if let Some(mut child) = children.get(i) {
+                        child.queue_free();
+                    }
+                }
 
                 if let Some(item) = selected_item {
-                    let asset_name = item.get_text(0);
-                    let asset_preview_node =
-                        AssetPreviewNode::new_with_asset(asset_name.to_string());
-                    preview.add_child(asset_preview_node);
+                    // Get the asset ID from metadata
+                    let asset_id = item.get_metadata(0).to::<GString>();
+
+                    // Retrieve full asset information from AssetManager
+                    if let Some(asset) = self.asset_manager.get_asset_by_id(&asset_id.to_string()) {
+                        // Convert Vec<String> to Array<GString>
+                        let mut tags_array = Array::<GString>::new();
+                        for tag in asset.tags.iter() {
+                            tags_array.push(tag.clone().into());
+                        }
+
+                        let asset_preview_node = AssetPreviewNode::new_with_asset(
+                            asset.id.into(),
+                            asset.name.into(),
+                            asset.author.into(),
+                            asset.version.into(),
+                            asset.category.display_name().into(),
+                            asset.description.into(),
+                            tags_array,
+                            asset.preview_url.unwrap_or_default().into(),
+                        );
+                        preview.add_child(asset_preview_node);
+                    }
                 }
             }
         }
@@ -35,19 +169,108 @@ impl AssetLibraryGUI {
 
 #[godot_api]
 impl IControl for AssetLibraryGUI {
+    fn init(base: Base<Control>) -> Self {
+        Self {
+            base,
+            vbox: None,
+            search_box: None,
+            category_filter: None,
+            sort_by: None,
+            asset_list: None,
+            asset_preview: None,
+            asset_manager: AssetManager::new(),
+            current_search_query: String::new(),
+            current_category_filter: None,
+            current_sort_criteria: SortCriteria::Name,
+        }
+    }
+
     fn ready(&mut self) {
         let mut vbox = VBoxContainer::new_alloc();
 
         self.base_mut().set_name("GAB".into());
 
+        // Add search box
+        let mut search_hbox = HBoxContainer::new_alloc();
+
+        let mut search_label = Label::new_alloc();
+        search_label.set_text("Search:".into());
+        search_hbox.add_child(search_label);
+
+        let mut search_box = LineEdit::new_alloc();
+        search_box.set_placeholder("Search assets...".into());
+        search_box.set_custom_minimum_size(godot::prelude::Vector2::new(200.0, 0.0));
+        search_box.connect(
+            "text_changed".into(),
+            self.base().callable("on_search_changed"),
+        );
+        search_hbox.add_child(search_box.clone());
+        self.search_box = Some(search_box);
+
+        // Add category filter
+        let mut category_label = Label::new_alloc();
+        category_label.set_text("  Category:".into());
+        search_hbox.add_child(category_label);
+
+        let mut category_filter = OptionButton::new_alloc();
+        category_filter.add_item("All Categories".into());
+
+        // Add all available categories
+        let categories = AssetCategory::all();
+        for category in categories.iter() {
+            category_filter.add_item(category.display_name().into());
+        }
+
+        category_filter.connect(
+            "item_selected".into(),
+            self.base().callable("on_category_changed"),
+        );
+        search_hbox.add_child(category_filter.clone());
+        self.category_filter = Some(category_filter);
+
+        // Add sort by dropdown
+        let mut sort_label = Label::new_alloc();
+        sort_label.set_text("  Sort by:".into());
+        search_hbox.add_child(sort_label);
+
+        let mut sort_by = OptionButton::new_alloc();
+        sort_by.add_item("Name".into());
+        sort_by.add_item("Category".into());
+        sort_by.add_item("Author".into());
+        sort_by.connect(
+            "item_selected".into(),
+            self.base().callable("on_sort_changed"),
+        );
+        search_hbox.add_child(sort_by.clone());
+        self.sort_by = Some(sort_by);
+
+        vbox.add_child(search_hbox);
+
         let mut asset_list = Tree::new_alloc();
-        asset_list.set_columns(2);
-        asset_list.set_column_title(0, "Asset".into());
-        asset_list.set_column_title(1, "Type".into());
+        asset_list.set_columns(3);
+        asset_list.set_column_title(0, "Asset Name".into());
+        asset_list.set_column_title(1, "Category".into());
+        asset_list.set_column_title(2, "Author".into());
+        asset_list.set_hide_root(true);
         asset_list.connect(
             "item_selected".into(),
             self.base().callable("on_asset_selected"),
         );
+
+        // Populate the tree with assets from AssetManager
+        let root = asset_list.create_item();
+        let assets = self.asset_manager.get_assets();
+
+        for asset in assets {
+            if let Some(mut item) = asset_list.create_item_ex().parent(root.clone()).done() {
+                item.set_text(0, asset.name.clone().into());
+                item.set_text(1, asset.category.display_name().into());
+                item.set_text(2, asset.author.clone().into());
+                // Store the asset ID in the metadata for later retrieval
+                item.set_metadata(0, asset.id.to_variant());
+            }
+        }
+
         vbox.set_name("GAB".into());
         vbox.add_child(asset_list.clone());
         self.asset_list = Some(asset_list);
@@ -66,7 +289,14 @@ impl IControl for AssetLibraryGUI {
 pub struct AssetPreviewNode {
     #[base]
     base: Base<Control>,
-    asset: String,
+    asset_id: String,
+    asset_name: String,
+    asset_author: String,
+    asset_version: String,
+    asset_category: String,
+    asset_description: String,
+    asset_tags: Vec<String>,
+    asset_preview_url: Option<String>,
 }
 
 #[godot_api]
@@ -74,16 +304,79 @@ impl IControl for AssetPreviewNode {
     fn init(base: Base<Control>) -> Self {
         Self {
             base,
-            asset: String::new(),
+            asset_id: String::new(),
+            asset_name: String::new(),
+            asset_author: String::new(),
+            asset_version: String::new(),
+            asset_category: String::new(),
+            asset_description: String::new(),
+            asset_tags: Vec::new(),
+            asset_preview_url: None,
         }
     }
 
     fn ready(&mut self) {
-        let mut vbox = VBoxContainer::new_alloc();
+        use godot::classes::{HBoxContainer, RichTextLabel, ScrollContainer};
 
-        let mut label = Label::new_alloc();
-        label.set_text(self.asset.clone().into());
-        vbox.add_child(label);
+        let mut vbox = VBoxContainer::new_alloc();
+        vbox.set_custom_minimum_size(godot::prelude::Vector2::new(400.0, 300.0));
+
+        // Asset name header
+        let mut name_label = Label::new_alloc();
+        name_label.set_text(self.asset_name.clone().into());
+        name_label.add_theme_font_size_override("font_size".into(), 24);
+        vbox.add_child(name_label);
+
+        // Metadata row (Author, Version, Category)
+        let mut metadata_hbox = HBoxContainer::new_alloc();
+
+        let mut author_label = Label::new_alloc();
+        author_label.set_text(format!("Author: {}", self.asset_author).into());
+        metadata_hbox.add_child(author_label);
+
+        let mut version_label = Label::new_alloc();
+        version_label.set_text(format!("  Version: {}", self.asset_version).into());
+        metadata_hbox.add_child(version_label);
+
+        let mut category_label = Label::new_alloc();
+        category_label.set_text(format!("  Category: {}", self.asset_category).into());
+        metadata_hbox.add_child(category_label);
+
+        vbox.add_child(metadata_hbox);
+
+        // Preview image placeholder
+        if let Some(ref preview_url) = self.asset_preview_url {
+            let mut preview_label = Label::new_alloc();
+            preview_label.set_text(format!("Preview: {}", preview_url).into());
+            // TODO: Load actual image from URL in a future implementation
+            vbox.add_child(preview_label);
+        } else {
+            let mut no_preview_label = Label::new_alloc();
+            no_preview_label.set_text("No preview available".into());
+            vbox.add_child(no_preview_label);
+        }
+
+        // Description
+        let mut desc_label = Label::new_alloc();
+        desc_label.set_text("Description:".into());
+        desc_label.add_theme_font_size_override("font_size".into(), 16);
+        vbox.add_child(desc_label);
+
+        let mut scroll = ScrollContainer::new_alloc();
+        scroll.set_custom_minimum_size(godot::prelude::Vector2::new(0.0, 100.0));
+
+        let mut desc_text = RichTextLabel::new_alloc();
+        desc_text.set_text(self.asset_description.clone().into());
+        desc_text.set_fit_content(true);
+        scroll.add_child(desc_text);
+        vbox.add_child(scroll);
+
+        // Tags
+        if !self.asset_tags.is_empty() {
+            let mut tags_label = Label::new_alloc();
+            tags_label.set_text(format!("Tags: {}", self.asset_tags.join(", ")).into());
+            vbox.add_child(tags_label);
+        }
 
         self.base_mut().add_child(vbox);
     }
@@ -92,9 +385,33 @@ impl IControl for AssetPreviewNode {
 #[godot_api]
 impl AssetPreviewNode {
     #[func]
-    fn new_with_asset(asset: String) -> Gd<Self> {
+    fn new_with_asset(
+        asset_id: GString,
+        asset_name: GString,
+        asset_author: GString,
+        asset_version: GString,
+        asset_category: GString,
+        asset_description: GString,
+        asset_tags: Array<GString>,
+        asset_preview_url: GString,
+    ) -> Gd<Self> {
         let mut instance = Self::new_alloc();
-        instance.bind_mut().asset = asset;
+        {
+            let mut bind = instance.bind_mut();
+            bind.asset_id = asset_id.to_string();
+            bind.asset_name = asset_name.to_string();
+            bind.asset_author = asset_author.to_string();
+            bind.asset_version = asset_version.to_string();
+            bind.asset_category = asset_category.to_string();
+            bind.asset_description = asset_description.to_string();
+            bind.asset_tags = asset_tags.iter_shared().map(|s| s.to_string()).collect();
+            let preview_url_str = asset_preview_url.to_string();
+            bind.asset_preview_url = if preview_url_str.is_empty() {
+                None
+            } else {
+                Some(preview_url_str)
+            };
+        }
         instance
     }
 }
