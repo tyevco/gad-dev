@@ -1,6 +1,6 @@
 use godot::prelude::*;
 
-mod asset_library;
+pub mod asset_library;
 mod gui;
 mod asset_library_extension;
 
