@@ -110,20 +110,42 @@
 ## Phase 4: Network & API Integration
 
 ### 4.1 Godot Asset Library API
-- [ ] Implement API client for Godot Asset Library
-- [ ] Add asset listing endpoint integration
-- [ ] Add asset detail endpoint integration
-- [ ] Implement asset search endpoint
-- [ ] Add category/tag listing
-- [ ] Implement rate limiting and caching
+- [x] Implement API client for Godot Asset Library
+  - Location: `rust/src/asset_library/godot_asset_library_api.rs`
+  - Implemented actual HTTP client with reqwest
+- [x] Add asset listing endpoint integration
+  - Implemented list_assets() with full parameter support
+- [x] Add asset detail endpoint integration
+  - Implemented get_asset_detail() method
+- [x] Implement asset search endpoint
+  - Implemented search() method with pagination
+- [x] Add category/tag listing
+  - Implemented get_configure() and get_by_category() methods
+- [x] Implement rate limiting and caching
+  - Added RateLimiter with configurable requests per minute
+  - Added CacheEntry system with TTL support
+  - Automatic cache invalidation on expiry
 
 ### 4.2 Download Management
-- [ ] Implement concurrent download manager
-- [ ] Add download queue system
-- [ ] Implement download pause/resume functionality
-- [ ] Add retry logic for failed downloads
-- [ ] Implement bandwidth throttling options
-- [ ] Add download progress persistence (survive editor restart)
+- [x] Implement concurrent download manager
+  - Location: `rust/src/asset_library/download_manager.rs`
+  - Semaphore-based concurrency control with configurable limits
+- [x] Add download queue system
+  - Queue, start, pause, cancel functionality
+  - Download status tracking (Queued, InProgress, Paused, Completed, Failed, Cancelled)
+- [x] Implement download pause/resume functionality
+  - Pause and resume support with status management
+  - Proper cleanup of cancelled downloads
+- [x] Add retry logic for failed downloads
+  - Automatic retry with exponential backoff
+  - Configurable max retries and delay
+- [x] Implement bandwidth throttling options
+  - Configurable bandwidth limit (bytes per second)
+  - Chunk-based throttling for smooth downloads
+- [x] Add download progress persistence (survive editor restart)
+  - DownloadInfo tracking with progress percentage
+  - Real-time speed calculation and ETA estimation
+  - Thread-safe state management for GUI integration
 
 ---
 

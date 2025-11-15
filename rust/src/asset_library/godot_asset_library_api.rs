@@ -1,9 +1,113 @@
 use super::asset::{Asset, AssetCategory};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
+use reqwest::Client;
 
 /// Godot Asset Library API base URL
 pub const GODOT_ASSET_LIBRARY_API: &str = "https://godotengine.org/asset-library/api";
+
+/// Default cache TTL (time to live) in seconds
+const DEFAULT_CACHE_TTL: u64 = 300; // 5 minutes
+
+/// Default rate limit: requests per minute
+const DEFAULT_RATE_LIMIT: u32 = 60;
+
+/// Cache entry for API responses
+#[derive(Debug, Clone)]
+struct CacheEntry {
+    /// Cached JSON string
+    data: String,
+    /// When this entry was created
+    created_at: Instant,
+    /// Time-to-live in seconds
+    ttl: Duration,
+}
+
+impl CacheEntry {
+    /// Creates a new cache entry with default TTL
+    fn new(data: String) -> Self {
+        Self {
+            data,
+            created_at: Instant::now(),
+            ttl: Duration::from_secs(DEFAULT_CACHE_TTL),
+        }
+    }
+
+    /// Creates a new cache entry with custom TTL
+    fn with_ttl(data: String, ttl_seconds: u64) -> Self {
+        Self {
+            data,
+            created_at: Instant::now(),
+            ttl: Duration::from_secs(ttl_seconds),
+        }
+    }
+
+    /// Checks if this cache entry has expired
+    fn is_expired(&self) -> bool {
+        self.created_at.elapsed() > self.ttl
+    }
+}
+
+/// Rate limiter to prevent API abuse
+#[derive(Debug)]
+struct RateLimiter {
+    /// Request timestamps within the current window
+    requests: Vec<Instant>,
+    /// Maximum requests per minute
+    max_requests: u32,
+    /// Time window for rate limiting
+    window: Duration,
+}
+
+impl RateLimiter {
+    /// Creates a new rate limiter
+    fn new(max_requests_per_minute: u32) -> Self {
+        Self {
+            requests: Vec::new(),
+            max_requests: max_requests_per_minute,
+            window: Duration::from_secs(60),
+        }
+    }
+
+    /// Checks if a request can be made, and if so, records it
+    fn check_and_record(&mut self) -> Result<(), String> {
+        let now = Instant::now();
+
+        // Remove old requests outside the window
+        self.requests.retain(|&timestamp| now.duration_since(timestamp) < self.window);
+
+        // Check if we've hit the limit
+        if self.requests.len() >= self.max_requests as usize {
+            return Err(format!(
+                "Rate limit exceeded: {} requests per minute",
+                self.max_requests
+            ));
+        }
+
+        // Record this request
+        self.requests.push(now);
+        Ok(())
+    }
+
+    /// Gets the time to wait before the next request can be made
+    fn time_until_available(&self) -> Option<Duration> {
+        if self.requests.len() < self.max_requests as usize {
+            return None;
+        }
+
+        // Find the oldest request
+        self.requests.first().map(|&oldest| {
+            let elapsed = oldest.elapsed();
+            if elapsed < self.window {
+                self.window - elapsed
+            } else {
+                Duration::from_secs(0)
+            }
+        })
+    }
+}
 
 /// Asset listing request parameters
 #[derive(Debug, Clone, Default)]
@@ -242,6 +346,14 @@ pub struct GodotAssetLibraryClient {
     base_url: String,
     /// Optional authentication token
     auth_token: Option<String>,
+    /// HTTP client for making requests
+    client: Client,
+    /// Response cache
+    cache: Arc<Mutex<HashMap<String, CacheEntry>>>,
+    /// Rate limiter
+    rate_limiter: Arc<Mutex<RateLimiter>>,
+    /// Cache enabled flag
+    cache_enabled: bool,
 }
 
 impl GodotAssetLibraryClient {
@@ -250,6 +362,13 @@ impl GodotAssetLibraryClient {
         Self {
             base_url: GODOT_ASSET_LIBRARY_API.to_string(),
             auth_token: None,
+            client: Client::builder()
+                .timeout(Duration::from_secs(30))
+                .build()
+                .unwrap_or_else(|_| Client::new()),
+            cache: Arc::new(Mutex::new(HashMap::new())),
+            rate_limiter: Arc::new(Mutex::new(RateLimiter::new(DEFAULT_RATE_LIMIT))),
+            cache_enabled: true,
         }
     }
 
@@ -258,6 +377,13 @@ impl GodotAssetLibraryClient {
         Self {
             base_url,
             auth_token: None,
+            client: Client::builder()
+                .timeout(Duration::from_secs(30))
+                .build()
+                .unwrap_or_else(|_| Client::new()),
+            cache: Arc::new(Mutex::new(HashMap::new())),
+            rate_limiter: Arc::new(Mutex::new(RateLimiter::new(DEFAULT_RATE_LIMIT))),
+            cache_enabled: true,
         }
     }
 
@@ -265,6 +391,23 @@ impl GodotAssetLibraryClient {
     pub fn with_auth(mut self, token: String) -> Self {
         self.auth_token = Some(token);
         self
+    }
+
+    /// Enables or disables caching
+    pub fn with_cache(mut self, enabled: bool) -> Self {
+        self.cache_enabled = enabled;
+        self
+    }
+
+    /// Sets a custom rate limit (requests per minute)
+    pub fn with_rate_limit(self, requests_per_minute: u32) -> Self {
+        *self.rate_limiter.lock().unwrap() = RateLimiter::new(requests_per_minute);
+        self
+    }
+
+    /// Clears the response cache
+    pub fn clear_cache(&self) {
+        self.cache.lock().unwrap().clear();
     }
 
     /// Fetches a list of assets with optional filters
@@ -347,30 +490,66 @@ impl GodotAssetLibraryClient {
 
     /// Internal method to fetch JSON from the API
     async fn fetch_json<T: for<'de> Deserialize<'de>>(&self, url: &str) -> Result<T, String> {
-        // This is a placeholder for actual HTTP request implementation
-        // In a real implementation, you would use reqwest or similar:
-        //
-        // let client = reqwest::Client::new();
-        // let mut request = client.get(url);
-        //
-        // if let Some(ref token) = self.auth_token {
-        //     request = request.header("Authorization", format!("Bearer {}", token));
-        // }
-        //
-        // let response = request.send().await
-        //     .map_err(|e| format!("HTTP request failed: {}", e))?;
-        //
-        // if !response.status().is_success() {
-        //     return Err(format!("API returned error: {}", response.status()));
-        // }
-        //
-        // response.json::<T>().await
-        //     .map_err(|e| format!("Failed to parse JSON: {}", e))
+        // Check cache first if enabled
+        if self.cache_enabled {
+            let cache = self.cache.lock().unwrap();
+            if let Some(entry) = cache.get(url) {
+                if !entry.is_expired() {
+                    // Cache hit - deserialize and return
+                    return serde_json::from_str(&entry.data)
+                        .map_err(|e| format!("Failed to deserialize cached data: {}", e));
+                }
+            }
+        }
 
-        Err(format!(
-            "HTTP client not implemented yet. Would fetch: {}",
-            url
-        ))
+        // Check rate limit
+        {
+            let mut limiter = self.rate_limiter.lock().unwrap();
+            limiter.check_and_record().map_err(|e| {
+                if let Some(wait_time) = limiter.time_until_available() {
+                    format!("{} - retry in {} seconds", e, wait_time.as_secs())
+                } else {
+                    e
+                }
+            })?;
+        }
+
+        // Build the HTTP request
+        let mut request = self.client.get(url);
+
+        if let Some(ref token) = self.auth_token {
+            request = request.header("Authorization", format!("Bearer {}", token));
+        }
+
+        // Add user agent
+        request = request.header("User-Agent", "GodotAssetBrowser/1.0");
+
+        // Send the request
+        let response = request
+            .send()
+            .await
+            .map_err(|e| format!("HTTP request failed: {}", e))?;
+
+        // Check response status
+        if !response.status().is_success() {
+            return Err(format!("API returned error: {}", response.status()));
+        }
+
+        // Get the response text for caching
+        let response_text = response
+            .text()
+            .await
+            .map_err(|e| format!("Failed to read response body: {}", e))?;
+
+        // Store in cache if enabled
+        if self.cache_enabled {
+            let mut cache = self.cache.lock().unwrap();
+            cache.insert(url.to_string(), CacheEntry::new(response_text.clone()));
+        }
+
+        // Deserialize and return
+        serde_json::from_str(&response_text)
+            .map_err(|e| format!("Failed to parse JSON: {}", e))
     }
 
     /// Checks if the API is accessible (health check)
