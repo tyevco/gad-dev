@@ -1,4 +1,4 @@
-use godot::classes::{Control, GridContainer, HBoxContainer, IControl, Label, LineEdit, OptionButton, Tree, VBoxContainer};
+use godot::classes::{Control, GridContainer, HBoxContainer, IControl, Label, LineEdit, OptionButton, Panel, StyleBoxFlat, Tree, VBoxContainer};
 use godot::prelude::*;
 use godot::builtin::Array;
 use crate::asset_library::{AssetManager, AssetCategory};
@@ -149,6 +149,17 @@ impl AssetLibraryGUI {
                             tags_array.push(tag.clone().into());
                         }
 
+                        // Determine asset status
+                        let status = if self.asset_manager.is_asset_installed(&asset.id) {
+                            if self.asset_manager.check_for_update(&asset.id).unwrap_or(None).is_some() {
+                                AssetStatus::UpdateAvailable
+                            } else {
+                                AssetStatus::Installed
+                            }
+                        } else {
+                            AssetStatus::NotInstalled
+                        };
+
                         let asset_preview_node = AssetPreviewNode::new_with_asset(
                             asset.id.into(),
                             asset.name.into(),
@@ -158,6 +169,7 @@ impl AssetLibraryGUI {
                             asset.description.into(),
                             tags_array,
                             asset.preview_url.unwrap_or_default().into(),
+                            status as i32,
                         );
                         preview.add_child(asset_preview_node);
                     }
@@ -190,6 +202,12 @@ impl IControl for AssetLibraryGUI {
 
         self.base_mut().set_name("GAB".into());
 
+        // Make the GUI responsive by setting anchors
+        self.base_mut().set_anchor(godot::builtin::Side::LEFT, 0.0);
+        self.base_mut().set_anchor(godot::builtin::Side::TOP, 0.0);
+        self.base_mut().set_anchor(godot::builtin::Side::RIGHT, 1.0);
+        self.base_mut().set_anchor(godot::builtin::Side::BOTTOM, 1.0);
+
         // Add search box
         let mut search_hbox = HBoxContainer::new_alloc();
 
@@ -200,6 +218,9 @@ impl IControl for AssetLibraryGUI {
         let mut search_box = LineEdit::new_alloc();
         search_box.set_placeholder("Search assets...".into());
         search_box.set_custom_minimum_size(godot::prelude::Vector2::new(200.0, 0.0));
+        search_box.set_h_size_flags(godot::classes::control::SizeFlags::EXPAND_FILL);
+        search_box.set_focus_mode(godot::classes::control::FocusMode::ALL);
+        search_box.set_tooltip_text("Search assets by name, tags, or description".into());
         search_box.connect(
             "text_changed".into(),
             self.base().callable("on_search_changed"),
@@ -252,6 +273,14 @@ impl IControl for AssetLibraryGUI {
         asset_list.set_column_title(1, "Category".into());
         asset_list.set_column_title(2, "Author".into());
         asset_list.set_hide_root(true);
+
+        // Make the tree responsive
+        asset_list.set_v_size_flags(godot::classes::control::SizeFlags::EXPAND_FILL);
+        asset_list.set_custom_minimum_size(godot::prelude::Vector2::new(0.0, 300.0));
+
+        // Enable keyboard navigation
+        asset_list.set_focus_mode(godot::classes::control::FocusMode::ALL);
+
         asset_list.connect(
             "item_selected".into(),
             self.base().callable("on_asset_selected"),
@@ -272,16 +301,32 @@ impl IControl for AssetLibraryGUI {
         }
 
         vbox.set_name("GAB".into());
+
+        // Make vbox fill the parent container
+        vbox.set_anchor(godot::builtin::Side::LEFT, 0.0);
+        vbox.set_anchor(godot::builtin::Side::TOP, 0.0);
+        vbox.set_anchor(godot::builtin::Side::RIGHT, 1.0);
+        vbox.set_anchor(godot::builtin::Side::BOTTOM, 1.0);
+
         vbox.add_child(asset_list.clone());
         self.asset_list = Some(asset_list);
 
-        let asset_preview = GridContainer::new_alloc();
+        let mut asset_preview = GridContainer::new_alloc();
+        asset_preview.set_columns(1);
+        asset_preview.set_v_size_flags(godot::classes::control::SizeFlags::EXPAND_FILL);
         vbox.add_child(asset_preview.clone());
         self.asset_preview = Some(asset_preview);
 
         self.base_mut().add_child(vbox.clone());
         self.vbox = Some(vbox);
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AssetStatus {
+    NotInstalled,
+    Installed,
+    UpdateAvailable,
 }
 
 #[derive(GodotClass)]
@@ -297,6 +342,7 @@ pub struct AssetPreviewNode {
     asset_description: String,
     asset_tags: Vec<String>,
     asset_preview_url: Option<String>,
+    asset_status: AssetStatus,
 }
 
 #[godot_api]
@@ -312,6 +358,7 @@ impl IControl for AssetPreviewNode {
             asset_description: String::new(),
             asset_tags: Vec::new(),
             asset_preview_url: None,
+            asset_status: AssetStatus::NotInstalled,
         }
     }
 
@@ -321,25 +368,63 @@ impl IControl for AssetPreviewNode {
         let mut vbox = VBoxContainer::new_alloc();
         vbox.set_custom_minimum_size(godot::prelude::Vector2::new(400.0, 300.0));
 
+        // Header with name and status badge
+        let mut header_hbox = HBoxContainer::new_alloc();
+
         // Asset name header
         let mut name_label = Label::new_alloc();
         name_label.set_text(self.asset_name.clone().into());
         name_label.add_theme_font_size_override("font_size".into(), 24);
-        vbox.add_child(name_label);
+        name_label.set_tooltip_text(format!("Asset ID: {}", self.asset_id).into());
+        header_hbox.add_child(name_label);
+
+        // Status badge
+        let mut status_badge = Panel::new_alloc();
+        let mut badge_label = Label::new_alloc();
+
+        let (badge_text, badge_color, tooltip) = match self.asset_status {
+            AssetStatus::NotInstalled => ("Not Installed", Color::from_rgb(0.5, 0.5, 0.5), "This asset is not installed"),
+            AssetStatus::Installed => ("Installed", Color::from_rgb(0.2, 0.8, 0.2), "This asset is installed and up to date"),
+            AssetStatus::UpdateAvailable => ("Update Available", Color::from_rgb(0.8, 0.6, 0.2), "A newer version of this asset is available"),
+        };
+
+        badge_label.set_text(badge_text.into());
+        badge_label.add_theme_color_override("font_color".into(), Color::from_rgb(1.0, 1.0, 1.0));
+        badge_label.add_theme_font_size_override("font_size".into(), 12);
+
+        // Create and configure badge background
+        let mut style_box = StyleBoxFlat::new_gd();
+        style_box.set_bg_color(badge_color);
+        style_box.set_corner_radius_all(4);
+        style_box.set_content_margin(godot::builtin::Side::LEFT, 8.0);
+        style_box.set_content_margin(godot::builtin::Side::RIGHT, 8.0);
+        style_box.set_content_margin(godot::builtin::Side::TOP, 4.0);
+        style_box.set_content_margin(godot::builtin::Side::BOTTOM, 4.0);
+
+        status_badge.add_theme_stylebox_override("panel".into(), style_box.upcast::<godot::classes::StyleBox>());
+        status_badge.add_child(badge_label);
+        status_badge.set_tooltip_text(tooltip.into());
+        status_badge.set_custom_minimum_size(godot::prelude::Vector2::new(0.0, 32.0));
+
+        header_hbox.add_child(status_badge);
+        vbox.add_child(header_hbox);
 
         // Metadata row (Author, Version, Category)
         let mut metadata_hbox = HBoxContainer::new_alloc();
 
         let mut author_label = Label::new_alloc();
         author_label.set_text(format!("Author: {}", self.asset_author).into());
+        author_label.set_tooltip_text(format!("Created by {}", self.asset_author).into());
         metadata_hbox.add_child(author_label);
 
         let mut version_label = Label::new_alloc();
         version_label.set_text(format!("  Version: {}", self.asset_version).into());
+        version_label.set_tooltip_text(format!("Current version: {}", self.asset_version).into());
         metadata_hbox.add_child(version_label);
 
         let mut category_label = Label::new_alloc();
         category_label.set_text(format!("  Category: {}", self.asset_category).into());
+        category_label.set_tooltip_text(format!("Asset category: {}", self.asset_category).into());
         metadata_hbox.add_child(category_label);
 
         vbox.add_child(metadata_hbox);
@@ -375,8 +460,12 @@ impl IControl for AssetPreviewNode {
         if !self.asset_tags.is_empty() {
             let mut tags_label = Label::new_alloc();
             tags_label.set_text(format!("Tags: {}", self.asset_tags.join(", ")).into());
+            tags_label.set_tooltip_text("Click tags to filter by tag (feature coming soon)".into());
             vbox.add_child(tags_label);
         }
+
+        // Enable mouse filtering for hover effects
+        self.base_mut().set_mouse_filter(godot::classes::control::MouseFilter::PASS);
 
         self.base_mut().add_child(vbox);
     }
@@ -394,6 +483,7 @@ impl AssetPreviewNode {
         asset_description: GString,
         asset_tags: Array<GString>,
         asset_preview_url: GString,
+        asset_status: i32,
     ) -> Gd<Self> {
         let mut instance = Self::new_alloc();
         {
@@ -410,6 +500,12 @@ impl AssetPreviewNode {
                 None
             } else {
                 Some(preview_url_str)
+            };
+            bind.asset_status = match asset_status {
+                0 => AssetStatus::NotInstalled,
+                1 => AssetStatus::Installed,
+                2 => AssetStatus::UpdateAvailable,
+                _ => AssetStatus::NotInstalled,
             };
         }
         instance
