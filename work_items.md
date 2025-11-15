@@ -210,9 +210,15 @@
 ## Phase 6: Testing & Documentation
 
 ### 6.1 Testing
-- [ ] Add unit tests for Asset structs
-- [ ] Add unit tests for AssetManager
-- [ ] Add unit tests for ConfigManager
+- [x] Add unit tests for Asset structs
+  - Location: `rust/src/asset_library/asset.rs` (lines 453-904)
+  - 31 comprehensive tests covering SemanticVersion, AssetVersionInfo, AssetCategory, AssetDependency, and Asset
+- [x] Add unit tests for AssetManager
+  - Location: `rust/src/asset_library/asset_manager.rs` (lines 1658-2019)
+  - 19 tests covering initialization, asset management, search, filtering, and version checking
+- [x] Add unit tests for ConfigManager
+  - Location: `rust/src/asset_library/config_manager.rs` (lines 330-645)
+  - 23 tests covering configuration, asset sources, preferences, and migration
 - [ ] Add integration tests for download functionality
 - [ ] Add integration tests for import functionality
 - [ ] Add GUI interaction tests

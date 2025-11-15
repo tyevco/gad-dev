@@ -406,4 +406,240 @@ mod tests {
         manager.set_default_filters(vec!["models".to_string(), "textures".to_string()]);
         assert_eq!(manager.get_preferences().default_filters.len(), 2);
     }
+
+    #[test]
+    fn test_config_manager_new() {
+        let manager = ConfigManager::new();
+
+        assert_eq!(manager.get_version(), 1);
+        assert!(!manager.get_asset_sources().is_empty(), "Should have default asset source");
+    }
+
+    #[test]
+    fn test_config_default() {
+        let config = Config::default();
+
+        assert_eq!(config.version, 1);
+        assert_eq!(config.asset_sources.len(), 1);
+        assert_eq!(config.asset_sources[0].name, "Godot Asset Library");
+        assert_eq!(config.preferences.theme, "default");
+        assert_eq!(config.preferences.layout, "grid");
+        assert!(config.preferences.show_previews);
+        assert!(config.preferences.auto_update_check);
+    }
+
+    #[test]
+    fn test_user_preferences_default() {
+        let prefs = UserPreferences::default();
+
+        assert_eq!(prefs.theme, "default");
+        assert_eq!(prefs.layout, "grid");
+        assert!(prefs.default_filters.is_empty());
+        assert!(prefs.show_previews);
+        assert!(prefs.auto_update_check);
+        assert!(prefs.download_path.is_none());
+    }
+
+    #[test]
+    fn test_asset_source_new() {
+        let source = AssetSource::new("Test".to_string(), "https://test.com".to_string());
+
+        assert_eq!(source.name, "Test");
+        assert_eq!(source.url, "https://test.com");
+        assert!(source.enabled);
+        assert!(source.auth_token.is_none());
+    }
+
+    #[test]
+    fn test_asset_source_validation_empty_name() {
+        let source = AssetSource::new("".to_string(), "https://example.com".to_string());
+        assert!(source.validate().is_err());
+
+        let source = AssetSource::new("   ".to_string(), "https://example.com".to_string());
+        assert!(source.validate().is_err());
+    }
+
+    #[test]
+    fn test_asset_source_validation_empty_url() {
+        let source = AssetSource::new("Test".to_string(), "".to_string());
+        assert!(source.validate().is_err());
+
+        let source = AssetSource::new("Test".to_string(), "   ".to_string());
+        assert!(source.validate().is_err());
+    }
+
+    #[test]
+    fn test_asset_source_validation_invalid_protocol() {
+        let source = AssetSource::new("Test".to_string(), "ftp://example.com".to_string());
+        assert!(source.validate().is_err());
+
+        let source = AssetSource::new("Test".to_string(), "file:///path".to_string());
+        assert!(source.validate().is_err());
+    }
+
+    #[test]
+    fn test_asset_source_validation_http_and_https() {
+        let http_source = AssetSource::new("Test".to_string(), "http://example.com".to_string());
+        assert!(http_source.validate().is_ok());
+
+        let https_source = AssetSource::new("Test".to_string(), "https://example.com".to_string());
+        assert!(https_source.validate().is_ok());
+    }
+
+    #[test]
+    fn test_add_asset_source_with_auth() {
+        let mut manager = ConfigManager::new();
+
+        manager.add_asset_source_with_auth(
+            "Private Repo".to_string(),
+            "https://private.com/api".to_string(),
+            "secret_token_123".to_string(),
+        ).unwrap();
+
+        let sources = manager.get_asset_sources();
+        let private_source = sources.iter().find(|s| s.name == "Private Repo").unwrap();
+
+        assert_eq!(private_source.auth_token, Some("secret_token_123".to_string()));
+    }
+
+    #[test]
+    fn test_get_enabled_asset_sources() {
+        let mut manager = ConfigManager::new();
+
+        // Add a new source
+        manager.add_asset_source("Test Source".to_string(), "https://test.com".to_string()).unwrap();
+
+        // All sources should be enabled by default
+        let enabled = manager.get_enabled_asset_sources();
+        assert_eq!(enabled.len(), 2);
+
+        // Disable one source
+        manager.set_asset_source_enabled("Test Source", false).unwrap();
+
+        let enabled = manager.get_enabled_asset_sources();
+        assert_eq!(enabled.len(), 1);
+    }
+
+    #[test]
+    fn test_set_asset_source_enabled() {
+        let mut manager = ConfigManager::new();
+
+        manager.add_asset_source("Test".to_string(), "https://test.com".to_string()).unwrap();
+
+        // Disable
+        manager.set_asset_source_enabled("Test", false).unwrap();
+        let source = manager.get_asset_sources().iter().find(|s| s.name == "Test").unwrap();
+        assert!(!source.enabled);
+
+        // Enable
+        manager.set_asset_source_enabled("Test", true).unwrap();
+        let source = manager.get_asset_sources().iter().find(|s| s.name == "Test").unwrap();
+        assert!(source.enabled);
+
+        // Try to enable non-existent source
+        assert!(manager.set_asset_source_enabled("Nonexistent", true).is_err());
+    }
+
+    #[test]
+    fn test_update_preferences() {
+        let mut manager = ConfigManager::new();
+
+        let new_prefs = UserPreferences {
+            theme: "dark".to_string(),
+            layout: "list".to_string(),
+            default_filters: vec!["3d".to_string()],
+            show_previews: false,
+            auto_update_check: false,
+            download_path: Some("/custom/path".to_string()),
+        };
+
+        manager.update_preferences(new_prefs.clone());
+
+        let prefs = manager.get_preferences();
+        assert_eq!(prefs.theme, "dark");
+        assert_eq!(prefs.layout, "list");
+        assert_eq!(prefs.default_filters, vec!["3d".to_string()]);
+        assert!(!prefs.show_previews);
+        assert!(!prefs.auto_update_check);
+        assert_eq!(prefs.download_path, Some("/custom/path".to_string()));
+    }
+
+    #[test]
+    fn test_config_migration_no_op() {
+        let config = Config {
+            version: 1,
+            asset_sources: vec![],
+            preferences: UserPreferences::default(),
+        };
+
+        // Migration from same version should succeed (no-op)
+        let migrated = config.clone().migrate(1, 1).unwrap();
+        assert_eq!(migrated.version, 1);
+
+        // Migration backwards should succeed (no-op, version stays the same)
+        let migrated = config.migrate(1, 0).unwrap();
+        assert_eq!(migrated.version, 1); // Version doesn't change when from_version >= to_version
+    }
+
+    #[test]
+    fn test_config_migration_invalid_path() {
+        let config = Config {
+            version: 5,
+            asset_sources: vec![],
+            preferences: UserPreferences::default(),
+        };
+
+        // Migration from unknown version should fail
+        let result = config.migrate(5, 10);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_multiple_asset_sources() {
+        let mut manager = ConfigManager::new();
+
+        manager.add_asset_source("Source1".to_string(), "https://source1.com".to_string()).unwrap();
+        manager.add_asset_source("Source2".to_string(), "https://source2.com".to_string()).unwrap();
+        manager.add_asset_source("Source3".to_string(), "https://source3.com".to_string()).unwrap();
+
+        assert_eq!(manager.get_asset_sources().len(), 4); // Including default
+    }
+
+    #[test]
+    fn test_remove_all_custom_sources() {
+        let mut manager = ConfigManager::new();
+
+        manager.add_asset_source("Source1".to_string(), "https://source1.com".to_string()).unwrap();
+        manager.add_asset_source("Source2".to_string(), "https://source2.com".to_string()).unwrap();
+
+        manager.remove_asset_source("Source1").unwrap();
+        manager.remove_asset_source("Source2").unwrap();
+
+        // Should only have default source left
+        assert_eq!(manager.get_asset_sources().len(), 1);
+        assert_eq!(manager.get_asset_sources()[0].name, "Godot Asset Library");
+    }
+
+    #[test]
+    fn test_asset_source_equality() {
+        let source1 = AssetSource::new("Test".to_string(), "https://test.com".to_string());
+        let source2 = AssetSource::new("Test".to_string(), "https://test.com".to_string());
+        let source3 = AssetSource::new("Different".to_string(), "https://test.com".to_string());
+
+        assert_eq!(source1, source2);
+        assert_ne!(source1, source3);
+    }
+
+    #[test]
+    fn test_user_preferences_equality() {
+        let prefs1 = UserPreferences::default();
+        let prefs2 = UserPreferences::default();
+
+        assert_eq!(prefs1, prefs2);
+
+        let mut prefs3 = UserPreferences::default();
+        prefs3.theme = "dark".to_string();
+
+        assert_ne!(prefs1, prefs3);
+    }
 }

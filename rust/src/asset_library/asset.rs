@@ -449,3 +449,456 @@ impl Asset {
         SemanticVersion::parse(&self.version)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // SemanticVersion Tests
+    #[test]
+    fn test_semantic_version_new() {
+        let version = SemanticVersion::new(1, 2, 3);
+        assert_eq!(version.major, 1);
+        assert_eq!(version.minor, 2);
+        assert_eq!(version.patch, 3);
+        assert_eq!(version.pre_release, None);
+    }
+
+    #[test]
+    fn test_semantic_version_with_pre_release() {
+        let version = SemanticVersion::with_pre_release(2, 0, 0, "beta.1".to_string());
+        assert_eq!(version.major, 2);
+        assert_eq!(version.minor, 0);
+        assert_eq!(version.patch, 0);
+        assert_eq!(version.pre_release, Some("beta.1".to_string()));
+    }
+
+    #[test]
+    fn test_semantic_version_parse_valid() {
+        let version = SemanticVersion::parse("1.2.3").unwrap();
+        assert_eq!(version.major, 1);
+        assert_eq!(version.minor, 2);
+        assert_eq!(version.patch, 3);
+        assert_eq!(version.pre_release, None);
+    }
+
+    #[test]
+    fn test_semantic_version_parse_with_pre_release() {
+        let version = SemanticVersion::parse("2.0.0-alpha").unwrap();
+        assert_eq!(version.major, 2);
+        assert_eq!(version.minor, 0);
+        assert_eq!(version.patch, 0);
+        assert_eq!(version.pre_release, Some("alpha".to_string()));
+    }
+
+    #[test]
+    fn test_semantic_version_parse_invalid() {
+        assert!(SemanticVersion::parse("1.2").is_err());
+        assert!(SemanticVersion::parse("1.2.3.4").is_err());
+        assert!(SemanticVersion::parse("abc").is_err());
+        assert!(SemanticVersion::parse("1.a.3").is_err());
+    }
+
+    #[test]
+    fn test_semantic_version_to_string() {
+        let version = SemanticVersion::new(1, 2, 3);
+        assert_eq!(version.to_string(), "1.2.3");
+
+        let version_pre = SemanticVersion::with_pre_release(2, 0, 0, "rc.1".to_string());
+        assert_eq!(version_pre.to_string(), "2.0.0-rc.1");
+    }
+
+    #[test]
+    fn test_semantic_version_compatibility() {
+        let v1 = SemanticVersion::new(1, 2, 3);
+        let v2 = SemanticVersion::new(1, 5, 0);
+        let v3 = SemanticVersion::new(2, 0, 0);
+        let v0 = SemanticVersion::new(0, 1, 0);
+
+        assert!(v1.is_compatible_with(&v2));
+        assert!(v2.is_compatible_with(&v1));
+        assert!(!v1.is_compatible_with(&v3));
+        assert!(!v0.is_compatible_with(&v1));
+    }
+
+    #[test]
+    fn test_semantic_version_ordering() {
+        let v1 = SemanticVersion::new(1, 0, 0);
+        let v2 = SemanticVersion::new(1, 1, 0);
+        let v3 = SemanticVersion::new(1, 1, 1);
+        let v4 = SemanticVersion::new(2, 0, 0);
+        let v5 = SemanticVersion::with_pre_release(1, 1, 1, "alpha".to_string());
+
+        assert!(v1 < v2);
+        assert!(v2 < v3);
+        assert!(v3 < v4);
+        assert!(v5 < v3); // Pre-release versions have lower precedence
+        assert!(v1 < v4);
+    }
+
+    #[test]
+    fn test_semantic_version_default() {
+        let version = SemanticVersion::default();
+        assert_eq!(version.major, 0);
+        assert_eq!(version.minor, 0);
+        assert_eq!(version.patch, 0);
+    }
+
+    // AssetVersionInfo Tests
+    #[test]
+    fn test_asset_version_info_new() {
+        let version = SemanticVersion::new(1, 0, 0);
+        let version_info = AssetVersionInfo::new(
+            version.clone(),
+            "2024-01-15".to_string(),
+            "Initial release".to_string(),
+            "https://example.com/download".to_string(),
+        );
+
+        assert_eq!(version_info.version, version);
+        assert_eq!(version_info.release_date, "2024-01-15");
+        assert_eq!(version_info.changelog, "Initial release");
+        assert_eq!(version_info.download_url, "https://example.com/download");
+        assert!(!version_info.deprecated);
+    }
+
+    #[test]
+    fn test_asset_version_info_mark_deprecated() {
+        let version = SemanticVersion::new(0, 9, 0);
+        let mut version_info = AssetVersionInfo::new(
+            version,
+            "2023-01-01".to_string(),
+            "Old version".to_string(),
+            "https://example.com/old".to_string(),
+        );
+
+        assert!(!version_info.deprecated);
+        version_info.mark_deprecated();
+        assert!(version_info.deprecated);
+    }
+
+    // AssetCategory Tests
+    #[test]
+    fn test_asset_category_display_name() {
+        assert_eq!(AssetCategory::TwoD.display_name(), "2D");
+        assert_eq!(AssetCategory::ThreeD.display_name(), "3D");
+        assert_eq!(AssetCategory::Shaders.display_name(), "Shaders");
+        assert_eq!(AssetCategory::Tools.display_name(), "Tools");
+    }
+
+    #[test]
+    fn test_asset_category_all() {
+        let categories = AssetCategory::all();
+        assert_eq!(categories.len(), 10);
+        assert!(categories.contains(&AssetCategory::TwoD));
+        assert!(categories.contains(&AssetCategory::Scripts));
+    }
+
+    #[test]
+    fn test_asset_category_default() {
+        assert_eq!(AssetCategory::default(), AssetCategory::Misc);
+    }
+
+    #[test]
+    fn test_asset_category_display() {
+        let category = AssetCategory::Tools;
+        assert_eq!(format!("{}", category), "Tools");
+    }
+
+    // AssetDependency Tests
+    #[test]
+    fn test_asset_dependency_new() {
+        let dep = AssetDependency::new(
+            "asset-123".to_string(),
+            "Required Asset".to_string(),
+            "^1.0.0".to_string(),
+        );
+
+        assert_eq!(dep.asset_id, "asset-123");
+        assert_eq!(dep.asset_name, "Required Asset");
+        assert_eq!(dep.version_requirement, "^1.0.0");
+        assert!(!dep.optional);
+        assert!(dep.is_required());
+    }
+
+    #[test]
+    fn test_asset_dependency_optional() {
+        let dep = AssetDependency::optional(
+            "asset-456".to_string(),
+            "Optional Asset".to_string(),
+            ">=2.0.0".to_string(),
+        );
+
+        assert_eq!(dep.asset_id, "asset-456");
+        assert!(dep.optional);
+        assert!(!dep.is_required());
+    }
+
+    // Asset Tests
+    #[test]
+    fn test_asset_new() {
+        let asset = Asset::new(
+            "asset-1".to_string(),
+            "Test Asset".to_string(),
+            AssetCategory::Tools,
+            "/path/to/asset".to_string(),
+            "Test Author".to_string(),
+            "1.0.0".to_string(),
+            "A test asset".to_string(),
+            vec!["test".to_string(), "demo".to_string()],
+            Some("https://example.com/preview.png".to_string()),
+            "https://example.com/download.zip".to_string(),
+            vec![],
+            vec![],
+        );
+
+        assert_eq!(asset.id, "asset-1");
+        assert_eq!(asset.name, "Test Asset");
+        assert_eq!(asset.category, AssetCategory::Tools);
+        assert_eq!(asset.author, "Test Author");
+        assert_eq!(asset.version, "1.0.0");
+        assert_eq!(asset.tags.len(), 2);
+    }
+
+    #[test]
+    fn test_asset_minimal() {
+        let asset = Asset::minimal("min-1".to_string(), "Minimal".to_string());
+
+        assert_eq!(asset.id, "min-1");
+        assert_eq!(asset.name, "Minimal");
+        assert_eq!(asset.category, AssetCategory::Misc);
+        assert_eq!(asset.version, "0.0.0");
+        assert!(asset.tags.is_empty());
+        assert!(asset.dependencies.is_empty());
+    }
+
+    #[test]
+    fn test_asset_add_dependency() {
+        let mut asset = Asset::minimal("test".to_string(), "Test".to_string());
+        assert!(!asset.has_dependencies());
+
+        let dep = AssetDependency::new(
+            "dep-1".to_string(),
+            "Dependency".to_string(),
+            "1.0.0".to_string(),
+        );
+        asset.add_dependency(dep);
+
+        assert!(asset.has_dependencies());
+        assert_eq!(asset.dependencies.len(), 1);
+    }
+
+    #[test]
+    fn test_asset_required_dependencies() {
+        let mut asset = Asset::minimal("test".to_string(), "Test".to_string());
+
+        let required = AssetDependency::new(
+            "req-1".to_string(),
+            "Required".to_string(),
+            "1.0.0".to_string(),
+        );
+        let optional = AssetDependency::optional(
+            "opt-1".to_string(),
+            "Optional".to_string(),
+            "2.0.0".to_string(),
+        );
+
+        asset.add_dependency(required);
+        asset.add_dependency(optional);
+
+        let required_deps = asset.required_dependencies();
+        let optional_deps = asset.optional_dependencies();
+
+        assert_eq!(required_deps.len(), 1);
+        assert_eq!(optional_deps.len(), 1);
+        assert_eq!(required_deps[0].asset_id, "req-1");
+        assert_eq!(optional_deps[0].asset_id, "opt-1");
+    }
+
+    #[test]
+    fn test_asset_depends_on() {
+        let mut asset = Asset::minimal("test".to_string(), "Test".to_string());
+        let dep = AssetDependency::new(
+            "dep-1".to_string(),
+            "Dependency".to_string(),
+            "1.0.0".to_string(),
+        );
+        asset.add_dependency(dep);
+
+        assert!(asset.depends_on("dep-1"));
+        assert!(!asset.depends_on("dep-2"));
+    }
+
+    #[test]
+    fn test_asset_add_version() {
+        let mut asset = Asset::minimal("test".to_string(), "Test".to_string());
+
+        let v1 = AssetVersionInfo::new(
+            SemanticVersion::new(1, 0, 0),
+            "2024-01-01".to_string(),
+            "First".to_string(),
+            "url1".to_string(),
+        );
+        let v2 = AssetVersionInfo::new(
+            SemanticVersion::new(1, 1, 0),
+            "2024-02-01".to_string(),
+            "Second".to_string(),
+            "url2".to_string(),
+        );
+
+        asset.add_version(v1);
+        asset.add_version(v2);
+
+        assert_eq!(asset.version_history.len(), 2);
+        // Should be sorted newest first
+        assert_eq!(asset.version_history[0].version, SemanticVersion::new(1, 1, 0));
+        assert_eq!(asset.version_history[1].version, SemanticVersion::new(1, 0, 0));
+    }
+
+    #[test]
+    fn test_asset_latest_version() {
+        let mut asset = Asset::minimal("test".to_string(), "Test".to_string());
+
+        assert!(asset.latest_version().is_none());
+
+        let v1 = AssetVersionInfo::new(
+            SemanticVersion::new(1, 0, 0),
+            "2024-01-01".to_string(),
+            "First".to_string(),
+            "url1".to_string(),
+        );
+        asset.add_version(v1);
+
+        let latest = asset.latest_version().unwrap();
+        assert_eq!(latest.version, SemanticVersion::new(1, 0, 0));
+    }
+
+    #[test]
+    fn test_asset_get_version() {
+        let mut asset = Asset::minimal("test".to_string(), "Test".to_string());
+
+        let v1 = AssetVersionInfo::new(
+            SemanticVersion::new(1, 0, 0),
+            "2024-01-01".to_string(),
+            "First".to_string(),
+            "url1".to_string(),
+        );
+        let v2 = AssetVersionInfo::new(
+            SemanticVersion::new(2, 0, 0),
+            "2024-02-01".to_string(),
+            "Second".to_string(),
+            "url2".to_string(),
+        );
+
+        asset.add_version(v1);
+        asset.add_version(v2);
+
+        let found = asset.get_version("1.0.0").unwrap();
+        assert_eq!(found.version, SemanticVersion::new(1, 0, 0));
+
+        assert!(asset.get_version("3.0.0").is_none());
+        assert!(asset.get_version("invalid").is_none());
+    }
+
+    #[test]
+    fn test_asset_available_versions() {
+        let mut asset = Asset::minimal("test".to_string(), "Test".to_string());
+
+        let mut v1 = AssetVersionInfo::new(
+            SemanticVersion::new(1, 0, 0),
+            "2024-01-01".to_string(),
+            "First".to_string(),
+            "url1".to_string(),
+        );
+        v1.mark_deprecated();
+
+        let v2 = AssetVersionInfo::new(
+            SemanticVersion::new(2, 0, 0),
+            "2024-02-01".to_string(),
+            "Second".to_string(),
+            "url2".to_string(),
+        );
+
+        asset.add_version(v1);
+        asset.add_version(v2);
+
+        let available = asset.available_versions();
+        assert_eq!(available.len(), 1);
+        assert_eq!(available[0].version, SemanticVersion::new(2, 0, 0));
+    }
+
+    #[test]
+    fn test_asset_has_update() {
+        let mut asset = Asset::minimal("test".to_string(), "Test".to_string());
+        asset.version = "1.0.0".to_string();
+
+        assert!(!asset.has_update());
+
+        let v2 = AssetVersionInfo::new(
+            SemanticVersion::new(1, 1, 0),
+            "2024-02-01".to_string(),
+            "Update".to_string(),
+            "url".to_string(),
+        );
+        asset.add_version(v2);
+
+        assert!(asset.has_update());
+    }
+
+    #[test]
+    fn test_asset_has_no_update_when_current() {
+        let mut asset = Asset::minimal("test".to_string(), "Test".to_string());
+        asset.version = "2.0.0".to_string();
+
+        let v1 = AssetVersionInfo::new(
+            SemanticVersion::new(2, 0, 0),
+            "2024-02-01".to_string(),
+            "Current".to_string(),
+            "url".to_string(),
+        );
+        asset.add_version(v1);
+
+        assert!(!asset.has_update());
+    }
+
+    #[test]
+    fn test_asset_current_semantic_version() {
+        let mut asset = Asset::minimal("test".to_string(), "Test".to_string());
+        asset.version = "1.2.3".to_string();
+
+        let version = asset.current_semantic_version().unwrap();
+        assert_eq!(version, SemanticVersion::new(1, 2, 3));
+
+        asset.version = "invalid".to_string();
+        assert!(asset.current_semantic_version().is_err());
+    }
+
+    #[test]
+    fn test_semantic_version_equality() {
+        let v1 = SemanticVersion::new(1, 2, 3);
+        let v2 = SemanticVersion::new(1, 2, 3);
+        let v3 = SemanticVersion::new(1, 2, 4);
+
+        assert_eq!(v1, v2);
+        assert_ne!(v1, v3);
+    }
+
+    #[test]
+    fn test_asset_version_info_equality() {
+        let version = SemanticVersion::new(1, 0, 0);
+        let info1 = AssetVersionInfo::new(
+            version.clone(),
+            "2024-01-01".to_string(),
+            "Test".to_string(),
+            "url".to_string(),
+        );
+        let info2 = AssetVersionInfo::new(
+            version,
+            "2024-01-01".to_string(),
+            "Test".to_string(),
+            "url".to_string(),
+        );
+
+        assert_eq!(info1, info2);
+    }
+}
