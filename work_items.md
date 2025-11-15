@@ -41,18 +41,18 @@
 ## Phase 2: Configuration Management
 
 ### 2.1 Config Manager
-- [ ] Implement `save_config()` method
+- [x] Implement `save_config()` method
   - Location: `rust/src/asset_library/config_manager.rs`
   - Requirements: Serialize config to JSON/TOML, save to Godot user directory
-- [ ] Implement `load_config()` method
+- [x] Implement `load_config()` method
   - Location: `rust/src/asset_library/config_manager.rs`
   - Requirements: Load and deserialize config, handle missing/corrupt files
-- [ ] Implement `add_asset_source()` method
+- [x] Implement `add_asset_source()` method
   - Location: `rust/src/asset_library/config_manager.rs`
   - Requirements: Add and validate new asset repository URLs
-- [ ] Add `remove_asset_source()` method
-- [ ] Implement configuration migration for version updates
-- [ ] Add user preferences storage (theme, layout, filters)
+- [x] Add `remove_asset_source()` method
+- [x] Implement configuration migration for version updates
+- [x] Add user preferences storage (theme, layout, filters)
 
 ### 2.2 Asset Sources
 - [ ] Design asset source registry system
