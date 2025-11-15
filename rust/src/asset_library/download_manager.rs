@@ -608,3 +608,400 @@ impl Default for DownloadManager {
         Self::new()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    #[test]
+    fn test_download_info_new() {
+        let info = DownloadInfo::new(
+            "test_1".to_string(),
+            "https://example.com/file.zip".to_string(),
+            PathBuf::from("/tmp/file.zip"),
+        );
+
+        assert_eq!(info.id, "test_1");
+        assert_eq!(info.url, "https://example.com/file.zip");
+        assert_eq!(info.status, DownloadStatus::Queued);
+        assert_eq!(info.downloaded_bytes, 0);
+        assert_eq!(info.retry_count, 0);
+        assert!(info.error.is_none());
+        assert!(info.started_at.is_none());
+    }
+
+    #[test]
+    fn test_download_info_progress_percent() {
+        let mut info = DownloadInfo::new(
+            "test".to_string(),
+            "https://example.com/file.zip".to_string(),
+            PathBuf::from("/tmp/file.zip"),
+        );
+
+        // No total size - should return 0%
+        assert_eq!(info.progress_percent(), 0.0);
+
+        // With total size
+        info.update_progress(500, Some(1000));
+        assert_eq!(info.progress_percent(), 50.0);
+
+        info.update_progress(1000, Some(1000));
+        assert_eq!(info.progress_percent(), 100.0);
+
+        info.update_progress(250, Some(1000));
+        assert_eq!(info.progress_percent(), 25.0);
+    }
+
+    #[test]
+    fn test_download_info_update_progress() {
+        let mut info = DownloadInfo::new(
+            "test".to_string(),
+            "https://example.com/file.zip".to_string(),
+            PathBuf::from("/tmp/file.zip"),
+        );
+
+        info.update_progress(1024, Some(2048));
+        assert_eq!(info.downloaded_bytes, 1024);
+        assert_eq!(info.total_size, Some(2048));
+    }
+
+    #[test]
+    fn test_download_info_speed_calculation() {
+        let mut info = DownloadInfo::new(
+            "test".to_string(),
+            "https://example.com/file.zip".to_string(),
+            PathBuf::from("/tmp/file.zip"),
+        );
+
+        // Set start time
+        info.started_at = Some(Instant::now() - Duration::from_secs(1));
+
+        // Update with 1000 bytes after 1 second
+        info.update_progress(1000, Some(2000));
+
+        // Speed should be approximately 1000 bytes/sec
+        assert!(info.speed_bps > 900.0 && info.speed_bps < 1100.0);
+
+        // ETA should be approximately 1 second (for remaining 1000 bytes)
+        if let Some(eta) = info.eta_seconds {
+            assert!(eta <= 2); // Allow some margin
+        }
+    }
+
+    #[test]
+    fn test_download_manager_new() {
+        let manager = DownloadManager::new();
+        assert!(manager.get_all_downloads().is_empty());
+    }
+
+    #[test]
+    fn test_download_manager_with_config() {
+        let config = DownloadManagerConfig {
+            max_concurrent: 2,
+            max_retries: 5,
+            retry_delay_seconds: 10,
+            timeout_seconds: 300,
+            chunk_size: 16384,
+            bandwidth_limit_bps: Some(1024 * 1024),
+        };
+
+        let manager = DownloadManager::with_config(config);
+        assert!(manager.get_all_downloads().is_empty());
+    }
+
+    #[test]
+    fn test_queue_download() {
+        let manager = DownloadManager::new();
+
+        let result = manager.queue_download(
+            "test_1".to_string(),
+            "https://example.com/file.zip".to_string(),
+            PathBuf::from("/tmp/file.zip"),
+        );
+
+        assert!(result.is_ok());
+
+        let downloads = manager.get_all_downloads();
+        assert_eq!(downloads.len(), 1);
+        assert_eq!(downloads[0].id, "test_1");
+        assert_eq!(downloads[0].status, DownloadStatus::Queued);
+    }
+
+    #[test]
+    fn test_queue_duplicate_download() {
+        let manager = DownloadManager::new();
+
+        manager.queue_download(
+            "test_1".to_string(),
+            "https://example.com/file.zip".to_string(),
+            PathBuf::from("/tmp/file.zip"),
+        ).unwrap();
+
+        // Try to queue same ID again
+        let result = manager.queue_download(
+            "test_1".to_string(),
+            "https://example.com/file2.zip".to_string(),
+            PathBuf::from("/tmp/file2.zip"),
+        );
+
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("already exists"));
+    }
+
+    #[test]
+    fn test_queue_multiple_downloads() {
+        let manager = DownloadManager::new();
+
+        for i in 0..5 {
+            let result = manager.queue_download(
+                format!("test_{}", i),
+                format!("https://example.com/file{}.zip", i),
+                PathBuf::from(format!("/tmp/file{}.zip", i)),
+            );
+            assert!(result.is_ok());
+        }
+
+        assert_eq!(manager.get_all_downloads().len(), 5);
+        assert_eq!(manager.get_queued_downloads().len(), 5);
+    }
+
+    #[test]
+    fn test_get_download_info() {
+        let manager = DownloadManager::new();
+
+        manager.queue_download(
+            "test_1".to_string(),
+            "https://example.com/file.zip".to_string(),
+            PathBuf::from("/tmp/file.zip"),
+        ).unwrap();
+
+        let info = manager.get_download_info("test_1");
+        assert!(info.is_some());
+        assert_eq!(info.unwrap().id, "test_1");
+
+        let not_found = manager.get_download_info("nonexistent");
+        assert!(not_found.is_none());
+    }
+
+    #[test]
+    fn test_get_queued_downloads() {
+        let manager = DownloadManager::new();
+
+        manager.queue_download(
+            "test_1".to_string(),
+            "https://example.com/file1.zip".to_string(),
+            PathBuf::from("/tmp/file1.zip"),
+        ).unwrap();
+
+        manager.queue_download(
+            "test_2".to_string(),
+            "https://example.com/file2.zip".to_string(),
+            PathBuf::from("/tmp/file2.zip"),
+        ).unwrap();
+
+        let queued = manager.get_queued_downloads();
+        assert_eq!(queued.len(), 2);
+        assert!(queued.iter().all(|d| d.status == DownloadStatus::Queued));
+    }
+
+    #[test]
+    fn test_pause_download() {
+        let manager = DownloadManager::new();
+
+        manager.queue_download(
+            "test_1".to_string(),
+            "https://example.com/file.zip".to_string(),
+            PathBuf::from("/tmp/file.zip"),
+        ).unwrap();
+
+        // Cannot pause queued download (must be in progress)
+        let result = manager.pause_download("test_1");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("not in progress"));
+
+        // Manually set to InProgress for testing pause
+        {
+            let mut downloads = manager.downloads.lock().unwrap();
+            downloads.get_mut("test_1").unwrap().status = DownloadStatus::InProgress;
+        }
+
+        // Now can pause in-progress download
+        let result = manager.pause_download("test_1");
+        assert!(result.is_ok());
+
+        let info = manager.get_download_info("test_1").unwrap();
+        assert_eq!(info.status, DownloadStatus::Paused);
+
+        // Cannot pause nonexistent download
+        let result = manager.pause_download("nonexistent");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_cancel_download() {
+        let manager = DownloadManager::new();
+
+        manager.queue_download(
+            "test_1".to_string(),
+            "https://example.com/file.zip".to_string(),
+            PathBuf::from("/tmp/file.zip"),
+        ).unwrap();
+
+        let result = manager.cancel_download("test_1");
+        assert!(result.is_ok());
+
+        let info = manager.get_download_info("test_1").unwrap();
+        assert_eq!(info.status, DownloadStatus::Cancelled);
+    }
+
+    #[test]
+    fn test_remove_download() {
+        let manager = DownloadManager::new();
+
+        manager.queue_download(
+            "test_1".to_string(),
+            "https://example.com/file.zip".to_string(),
+            PathBuf::from("/tmp/file.zip"),
+        ).unwrap();
+
+        assert!(manager.get_download_info("test_1").is_some());
+
+        let result = manager.remove_download("test_1");
+        assert!(result.is_ok());
+
+        assert!(manager.get_download_info("test_1").is_none());
+    }
+
+    #[test]
+    fn test_clear_completed() {
+        let manager = DownloadManager::new();
+
+        // Add several downloads
+        for i in 0..5 {
+            manager.queue_download(
+                format!("test_{}", i),
+                format!("https://example.com/file{}.zip", i),
+                PathBuf::from(format!("/tmp/file{}.zip", i)),
+            ).unwrap();
+        }
+
+        // Manually mark some as completed/failed for testing
+        {
+            let mut downloads = manager.downloads.lock().unwrap();
+            downloads.get_mut("test_0").unwrap().status = DownloadStatus::Completed;
+            downloads.get_mut("test_1").unwrap().status = DownloadStatus::Failed;
+            downloads.get_mut("test_2").unwrap().status = DownloadStatus::Queued;
+        }
+
+        manager.clear_completed();
+
+        let remaining = manager.get_all_downloads();
+        assert_eq!(remaining.len(), 3);
+        assert!(remaining.iter().all(|d|
+            d.status != DownloadStatus::Completed &&
+            d.status != DownloadStatus::Failed
+        ));
+    }
+
+    #[test]
+    fn test_download_status_equality() {
+        assert_eq!(DownloadStatus::Queued, DownloadStatus::Queued);
+        assert_ne!(DownloadStatus::Queued, DownloadStatus::InProgress);
+        assert_eq!(DownloadStatus::Completed, DownloadStatus::Completed);
+    }
+
+    #[test]
+    fn test_download_info_clone() {
+        let info = DownloadInfo::new(
+            "test".to_string(),
+            "https://example.com/file.zip".to_string(),
+            PathBuf::from("/tmp/file.zip"),
+        );
+
+        let cloned = info.clone();
+        assert_eq!(info.id, cloned.id);
+        assert_eq!(info.url, cloned.url);
+        assert_eq!(info.status, cloned.status);
+    }
+
+    #[test]
+    fn test_get_active_downloads() {
+        let manager = DownloadManager::new();
+
+        manager.queue_download(
+            "test_1".to_string(),
+            "https://example.com/file1.zip".to_string(),
+            PathBuf::from("/tmp/file1.zip"),
+        ).unwrap();
+
+        manager.queue_download(
+            "test_2".to_string(),
+            "https://example.com/file2.zip".to_string(),
+            PathBuf::from("/tmp/file2.zip"),
+        ).unwrap();
+
+        // Initially no active downloads
+        assert_eq!(manager.get_active_downloads().len(), 0);
+
+        // Manually set one to InProgress for testing
+        {
+            let mut downloads = manager.downloads.lock().unwrap();
+            downloads.get_mut("test_1").unwrap().status = DownloadStatus::InProgress;
+        }
+
+        let active = manager.get_active_downloads();
+        assert_eq!(active.len(), 1);
+        assert_eq!(active[0].id, "test_1");
+    }
+
+    #[test]
+    fn test_download_manager_default() {
+        let manager = DownloadManager::default();
+        assert!(manager.get_all_downloads().is_empty());
+    }
+
+    #[test]
+    fn test_download_info_progress_with_zero_total() {
+        let mut info = DownloadInfo::new(
+            "test".to_string(),
+            "https://example.com/file.zip".to_string(),
+            PathBuf::from("/tmp/file.zip"),
+        );
+
+        // Total size is 0
+        info.update_progress(100, Some(0));
+        assert_eq!(info.progress_percent(), 0.0);
+    }
+
+    #[test]
+    fn test_multiple_pause_cancel_operations() {
+        let manager = DownloadManager::new();
+
+        manager.queue_download(
+            "test_1".to_string(),
+            "https://example.com/file.zip".to_string(),
+            PathBuf::from("/tmp/file.zip"),
+        ).unwrap();
+
+        // Set to InProgress to allow pause
+        {
+            let mut downloads = manager.downloads.lock().unwrap();
+            downloads.get_mut("test_1").unwrap().status = DownloadStatus::InProgress;
+        }
+
+        // Pause
+        manager.pause_download("test_1").unwrap();
+        assert_eq!(
+            manager.get_download_info("test_1").unwrap().status,
+            DownloadStatus::Paused
+        );
+
+        // Cancel after pause
+        manager.cancel_download("test_1").unwrap();
+        assert_eq!(
+            manager.get_download_info("test_1").unwrap().status,
+            DownloadStatus::Cancelled
+        );
+    }
+}

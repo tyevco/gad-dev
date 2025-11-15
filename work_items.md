@@ -219,7 +219,9 @@
 - [x] Add unit tests for ConfigManager
   - Location: `rust/src/asset_library/config_manager.rs` (lines 330-645)
   - 23 tests covering configuration, asset sources, preferences, and migration
-- [ ] Add integration tests for download functionality
+- [x] Add integration tests for download functionality
+  - Location: `rust/src/asset_library/download_manager.rs` (lines 612-1008)
+  - 21 tests covering DownloadInfo, DownloadManager, queue management, state transitions, pause/resume, and cleanup
 - [ ] Add integration tests for import functionality
 - [ ] Add GUI interaction tests
 - [ ] Test cross-platform compatibility (Windows, Linux, macOS)
