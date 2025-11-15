@@ -55,11 +55,11 @@
 - [x] Add user preferences storage (theme, layout, filters)
 
 ### 2.2 Asset Sources
-- [ ] Design asset source registry system
-- [ ] Implement default asset source (Godot Asset Library API)
-- [ ] Add support for custom/private asset repositories
-- [ ] Implement source authentication (API keys, tokens)
-- [ ] Add source health checking and fallback mechanisms
+- [x] Design asset source registry system
+- [x] Implement default asset source (Godot Asset Library API)
+- [x] Add support for custom/private asset repositories
+- [x] Implement source authentication (API keys, tokens)
+- [x] Add source health checking and fallback mechanisms
 
 ---
 
