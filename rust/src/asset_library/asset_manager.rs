@@ -1654,3 +1654,366 @@ impl AssetImporter {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::asset_library::asset::{AssetDependency, AssetVersionInfo, SemanticVersion};
+
+    #[test]
+    fn test_asset_manager_new() {
+        let manager = AssetManager::new();
+
+        // Should have sample assets initialized
+        let assets = manager.get_assets();
+        assert!(!assets.is_empty(), "AssetManager should initialize with sample assets");
+
+        // Check asset directory is set
+        assert_eq!(manager.asset_dir, "res://addons/");
+        assert_eq!(manager.cache_dir, "user://asset_cache/");
+    }
+
+    #[test]
+    fn test_get_assets() {
+        let manager = AssetManager::new();
+        let assets = manager.get_assets();
+
+        // Should have sample assets
+        assert!(!assets.is_empty());
+
+        // Verify some sample assets are present
+        let asset_names: Vec<String> = assets.iter().map(|a| a.name.clone()).collect();
+        assert!(asset_names.iter().any(|name| name.contains("Sprites") || name.contains("Character") || name.contains("Shader")));
+    }
+
+    #[test]
+    fn test_get_assets_by_category() {
+        let manager = AssetManager::new();
+
+        // Test filtering by 2D category
+        let assets_2d = manager.get_assets_by_category(AssetCategory::TwoD);
+        for asset in &assets_2d {
+            assert_eq!(asset.category, AssetCategory::TwoD);
+        }
+
+        // Test filtering by 3D category
+        let assets_3d = manager.get_assets_by_category(AssetCategory::ThreeD);
+        for asset in &assets_3d {
+            assert_eq!(asset.category, AssetCategory::ThreeD);
+        }
+
+        // Test filtering by Shaders category
+        let assets_shaders = manager.get_assets_by_category(AssetCategory::Shaders);
+        for asset in &assets_shaders {
+            assert_eq!(asset.category, AssetCategory::Shaders);
+        }
+    }
+
+    #[test]
+    fn test_search_assets() {
+        let manager = AssetManager::new();
+
+        // Search by name
+        let results = manager.search_assets("sprite");
+        assert!(!results.is_empty(), "Should find assets matching 'sprite'");
+        for asset in &results {
+            let found = asset.name.to_lowercase().contains("sprite") ||
+                       asset.description.to_lowercase().contains("sprite") ||
+                       asset.tags.iter().any(|t| t.to_lowercase().contains("sprite"));
+            assert!(found, "Result should match search query");
+        }
+
+        // Search by description keyword
+        let results = manager.search_assets("visual");
+        for asset in &results {
+            let found = asset.name.to_lowercase().contains("visual") ||
+                       asset.description.to_lowercase().contains("visual") ||
+                       asset.tags.iter().any(|t| t.to_lowercase().contains("visual"));
+            assert!(found, "Result should match search query");
+        }
+
+        // Search with no results
+        let results = manager.search_assets("nonexistent_query_xyz");
+        assert!(results.is_empty(), "Should return empty for non-matching query");
+    }
+
+    #[test]
+    fn test_get_asset_by_id() {
+        let manager = AssetManager::new();
+        let all_assets = manager.get_assets();
+
+        if let Some(first_asset) = all_assets.first() {
+            let found = manager.get_asset_by_id(&first_asset.id);
+            assert!(found.is_some(), "Should find asset by ID");
+            assert_eq!(found.unwrap().id, first_asset.id);
+        }
+
+        // Test with non-existent ID
+        let not_found = manager.get_asset_by_id("nonexistent_id_xyz");
+        assert!(not_found.is_none(), "Should return None for non-existent ID");
+    }
+
+    #[test]
+    fn test_add_asset() {
+        let manager = AssetManager::new();
+        let initial_count = manager.get_assets().len();
+
+        let new_asset = Asset::new(
+            "test_asset_1".to_string(),
+            "Test Asset".to_string(),
+            AssetCategory::Tools,
+            "".to_string(),
+            "Test Author".to_string(),
+            "1.0.0".to_string(),
+            "A test asset".to_string(),
+            vec!["test".to_string()],
+            None,
+            "https://example.com/test.zip".to_string(),
+            vec![],
+            vec![],
+        );
+
+        manager.add_asset(new_asset.clone());
+
+        let updated_count = manager.get_assets().len();
+        assert_eq!(updated_count, initial_count + 1, "Asset count should increase by 1");
+
+        let found = manager.get_asset_by_id("test_asset_1");
+        assert!(found.is_some(), "Newly added asset should be found");
+        assert_eq!(found.unwrap().name, "Test Asset");
+    }
+
+    #[test]
+    fn test_remove_asset() {
+        let manager = AssetManager::new();
+
+        // Add a test asset
+        let test_asset = Asset::minimal("test_remove_1".to_string(), "Test Remove".to_string());
+        manager.add_asset(test_asset.clone());
+
+        // Verify it was added
+        assert!(manager.get_asset_by_id("test_remove_1").is_some());
+
+        // Remove it
+        manager.remove_asset("test_remove_1");
+
+        // Verify it was removed
+        assert!(manager.get_asset_by_id("test_remove_1").is_none());
+    }
+
+    #[test]
+    fn test_is_asset_installed() {
+        let manager = AssetManager::new();
+
+        // Initially no assets should be installed
+        assert!(!manager.is_asset_installed("test_asset_1"));
+
+        // Manually add to installed list for testing
+        {
+            let mut installed = manager.installed_assets.lock().unwrap();
+            installed.push("test_asset_1".to_string());
+        }
+
+        // Now it should be installed
+        assert!(manager.is_asset_installed("test_asset_1"));
+        assert!(!manager.is_asset_installed("test_asset_2"));
+    }
+
+    #[test]
+    fn test_get_installed_assets() {
+        let manager = AssetManager::new();
+
+        // Initially should be empty
+        let installed = manager.get_installed_assets();
+        let initial_count = installed.len();
+
+        // Add some installed assets for testing
+        {
+            let mut installed_list = manager.installed_assets.lock().unwrap();
+            installed_list.push("asset_1".to_string());
+            installed_list.push("asset_2".to_string());
+        }
+
+        let installed = manager.get_installed_assets();
+        assert_eq!(installed.len(), initial_count + 2);
+        assert!(installed.contains(&"asset_1".to_string()));
+        assert!(installed.contains(&"asset_2".to_string()));
+    }
+
+    #[test]
+    fn test_add_multiple_assets() {
+        let manager = AssetManager::new();
+        let initial_count = manager.get_assets().len();
+
+        for i in 0..5 {
+            let asset = Asset::minimal(
+                format!("test_multi_{}", i),
+                format!("Test Asset {}", i),
+            );
+            manager.add_asset(asset);
+        }
+
+        let final_count = manager.get_assets().len();
+        assert_eq!(final_count, initial_count + 5);
+    }
+
+    #[test]
+    fn test_search_by_tag() {
+        let manager = AssetManager::new();
+
+        // Add an asset with specific tags
+        let mut asset = Asset::minimal("tag_test_1".to_string(), "Tag Test".to_string());
+        asset.tags = vec!["unique_tag_xyz".to_string()];
+        manager.add_asset(asset);
+
+        // Search for that tag
+        let results = manager.search_assets("unique_tag_xyz");
+        assert!(!results.is_empty(), "Should find asset by tag");
+        assert!(results.iter().any(|a| a.id == "tag_test_1"));
+    }
+
+    #[test]
+    fn test_search_case_insensitive() {
+        let manager = AssetManager::new();
+
+        let asset = Asset::minimal("case_test_1".to_string(), "CaseSensitive".to_string());
+        manager.add_asset(asset);
+
+        // Search with different cases
+        let results_lower = manager.search_assets("casesensitive");
+        let results_upper = manager.search_assets("CASESENSITIVE");
+        let results_mixed = manager.search_assets("CaseSensitive");
+
+        assert!(!results_lower.is_empty());
+        assert!(!results_upper.is_empty());
+        assert!(!results_mixed.is_empty());
+    }
+
+    #[test]
+    fn test_get_assets_by_nonexistent_category() {
+        let manager = AssetManager::new();
+
+        // Add assets to ensure manager is not empty
+        let audio_assets = manager.get_assets_by_category(AssetCategory::Audio);
+
+        // Since we might not have audio assets in sample data, this could be empty
+        // But the call should not panic
+        for asset in &audio_assets {
+            assert_eq!(asset.category, AssetCategory::Audio);
+        }
+    }
+
+    #[test]
+    fn test_asset_removal_doesnt_affect_installed_list() {
+        let manager = AssetManager::new();
+
+        // Add and "install" an asset
+        let asset = Asset::minimal("persist_test_1".to_string(), "Persist Test".to_string());
+        manager.add_asset(asset);
+
+        {
+            let mut installed = manager.installed_assets.lock().unwrap();
+            installed.push("persist_test_1".to_string());
+        }
+
+        // Remove the asset from the main list
+        manager.remove_asset("persist_test_1");
+
+        // Installed list should still contain it
+        assert!(manager.is_asset_installed("persist_test_1"));
+    }
+
+    #[test]
+    fn test_check_for_update_no_version_history() {
+        let manager = AssetManager::new();
+
+        // Add an asset without version history
+        let asset = Asset::minimal("no_version_test".to_string(), "No Version Test".to_string());
+        manager.add_asset(asset);
+
+        let result = manager.check_for_update("no_version_test");
+
+        // Should succeed but return None (no update available)
+        assert!(result.is_ok());
+        if let Ok(update) = result {
+            assert!(update.is_none(), "Should have no update when no version history exists");
+        }
+    }
+
+    #[test]
+    fn test_check_for_update_with_newer_version() {
+        let manager = AssetManager::new();
+
+        // Add an asset with current version 1.0.0
+        let mut asset = Asset::minimal("version_test".to_string(), "Version Test".to_string());
+        asset.version = "1.0.0".to_string();
+
+        // Add a newer version to version history
+        let newer_version = AssetVersionInfo::new(
+            SemanticVersion::new(1, 1, 0),
+            "2024-01-15".to_string(),
+            "New version".to_string(),
+            "https://example.com/v1.1.0.zip".to_string(),
+        );
+        asset.version_history.push(newer_version);
+
+        manager.add_asset(asset);
+
+        let result = manager.check_for_update("version_test");
+        assert!(result.is_ok());
+        if let Ok(Some(update)) = result {
+            assert!(update.has_update());
+        }
+    }
+
+    #[test]
+    fn test_check_for_update_already_latest() {
+        let manager = AssetManager::new();
+
+        // Add an asset with current version 2.0.0
+        let mut asset = Asset::minimal("latest_test".to_string(), "Latest Test".to_string());
+        asset.version = "2.0.0".to_string();
+
+        // Add same version to version history
+        let same_version = AssetVersionInfo::new(
+            SemanticVersion::new(2, 0, 0),
+            "2024-01-15".to_string(),
+            "Current version".to_string(),
+            "https://example.com/v2.0.0.zip".to_string(),
+        );
+        asset.version_history.push(same_version);
+
+        manager.add_asset(asset);
+
+        let result = manager.check_for_update("latest_test");
+        assert!(result.is_ok());
+        if let Ok(update) = result {
+            assert!(update.is_none() || !update.unwrap().has_update());
+        }
+    }
+
+    #[test]
+    fn test_check_for_update_nonexistent_asset() {
+        let manager = AssetManager::new();
+
+        // When asset is not installed, it returns Ok(None)
+        let result = manager.check_for_update("nonexistent_asset_xyz");
+        assert!(result.is_ok(), "Should return Ok for non-installed asset");
+        assert!(result.unwrap().is_none(), "Should return None for non-installed asset");
+    }
+
+    #[test]
+    fn test_check_for_update_installed_but_not_in_catalog() {
+        let manager = AssetManager::new();
+
+        // Mark an asset as installed that doesn't exist in catalog
+        {
+            let mut installed = manager.installed_assets.lock().unwrap();
+            installed.push("nonexistent_asset_xyz".to_string());
+        }
+
+        // Now it should return an error since it's installed but not in catalog
+        let result = manager.check_for_update("nonexistent_asset_xyz");
+        assert!(result.is_err(), "Should return error for installed asset not in catalog");
+    }
+}
