@@ -28,13 +28,13 @@
 - [ ] Implement asset update checking
 
 ### 1.3 Asset Importer
-- [ ] Implement AssetImporter structure (currently stubbed)
+- [x] Implement AssetImporter structure (currently stubbed)
   - Location: `rust/src/asset_library/asset_manager.rs`
-- [ ] Add support for .zip archive extraction
-- [ ] Add support for .tar.gz archive extraction
-- [ ] Implement asset validation (check for required files, metadata)
-- [ ] Add integration with Godot's import system
-- [ ] Implement error handling and rollback on failed imports
+- [x] Add support for .zip archive extraction
+- [x] Add support for .tar.gz archive extraction
+- [x] Implement asset validation (check for required files, metadata)
+- [x] Add integration with Godot's import system
+- [x] Implement error handling and rollback on failed imports
 
 ---
 
