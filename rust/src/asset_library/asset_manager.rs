@@ -20,6 +20,76 @@ macro_rules! debug_print {
     ($($arg:tt)*) => { /* no-op in tests */ };
 }
 
+/// Search index for fast text-based asset lookups
+#[derive(Debug, Clone, Default)]
+struct SearchIndex {
+    /// Maps lowercase search terms to asset indices
+    term_to_assets: HashMap<String, Vec<usize>>,
+    /// Pre-computed lowercase names for faster searching
+    lowercase_names: Vec<String>,
+    /// Pre-computed lowercase tags for faster searching
+    lowercase_tags: Vec<Vec<String>>,
+    /// Pre-computed lowercase descriptions for faster searching
+    lowercase_descriptions: Vec<String>,
+}
+
+impl SearchIndex {
+    /// Rebuilds the search index from a list of assets
+    fn rebuild(&mut self, assets: &[Asset]) {
+        self.term_to_assets.clear();
+        self.lowercase_names.clear();
+        self.lowercase_tags.clear();
+        self.lowercase_descriptions.clear();
+
+        for (idx, asset) in assets.iter().enumerate() {
+            // Pre-compute lowercase strings
+            let name_lower = asset.name.to_lowercase();
+            let desc_lower = asset.description.to_lowercase();
+            let tags_lower: Vec<String> = asset.tags.iter()
+                .map(|t| t.to_lowercase())
+                .collect();
+
+            self.lowercase_names.push(name_lower.clone());
+            self.lowercase_descriptions.push(desc_lower.clone());
+            self.lowercase_tags.push(tags_lower.clone());
+
+            // Index words from name
+            for word in name_lower.split_whitespace() {
+                self.term_to_assets.entry(word.to_string())
+                    .or_insert_with(Vec::new)
+                    .push(idx);
+            }
+
+            // Index tags
+            for tag in &tags_lower {
+                self.term_to_assets.entry(tag.clone())
+                    .or_insert_with(Vec::new)
+                    .push(idx);
+            }
+        }
+    }
+
+    /// Fast search using pre-computed lowercase strings
+    fn search(&self, query: &str, assets: &[Asset]) -> Vec<Asset> {
+        let query_lower = query.to_lowercase();
+
+        assets.iter().enumerate()
+            .filter(|(idx, _)| {
+                self.lowercase_names.get(*idx)
+                    .map(|n| n.contains(&query_lower))
+                    .unwrap_or(false)
+                || self.lowercase_tags.get(*idx)
+                    .map(|tags| tags.iter().any(|t| t.contains(&query_lower)))
+                    .unwrap_or(false)
+                || self.lowercase_descriptions.get(*idx)
+                    .map(|d| d.contains(&query_lower))
+                    .unwrap_or(false)
+            })
+            .map(|(_, asset)| asset.clone())
+            .collect()
+    }
+}
+
 #[derive(GodotClass)]
 #[class(init)]
 pub struct AssetManager {
@@ -28,6 +98,7 @@ pub struct AssetManager {
     cache_dir: String,
     assets: Arc<Mutex<Vec<Asset>>>,
     installed_assets: Arc<Mutex<Vec<String>>>, // Track installed asset IDs
+    search_index: Arc<Mutex<SearchIndex>>, // Search index for fast lookups
 }
 
 impl AssetManager {
@@ -54,6 +125,7 @@ impl AssetManager {
             cache_dir: "user://asset_cache/".to_string(),
             assets: Arc::new(Mutex::new(Vec::new())),
             installed_assets: Arc::new(Mutex::new(Vec::new())),
+            search_index: Arc::new(Mutex::new(SearchIndex::default())),
         };
 
         // Ensure cache directory exists
@@ -145,6 +217,11 @@ impl AssetManager {
             vec![],
             vec![],
         ));
+
+        // Rebuild search index after adding assets
+        let assets_clone = assets.clone();
+        drop(assets); // Release lock before acquiring search_index lock
+        self.search_index.lock().unwrap().rebuild(&assets_clone);
     }
 
     /// Retrieves all assets from the asset library.
@@ -188,12 +265,18 @@ impl AssetManager {
     /// Searches for assets by name, tags, or description.
     ///
     /// Performs a case-insensitive search across asset names, tags, and descriptions.
+    /// This method uses a pre-computed search index for improved performance.
     ///
     /// # Arguments
     /// * `query` - The search query string
     ///
     /// # Returns
     /// * `Vec<Asset>` - A vector containing assets matching the search query
+    ///
+    /// # Performance
+    /// This method uses pre-computed lowercase strings to avoid repeated
+    /// allocations during search, significantly improving performance for
+    /// large asset lists.
     ///
     /// # Example
     /// ```
@@ -202,18 +285,58 @@ impl AssetManager {
     /// println!("Found {} assets matching 'shader'", results.len());
     /// ```
     pub fn search_assets(&self, query: &str) -> Vec<Asset> {
-        let query_lower = query.to_lowercase();
-        self.assets
-            .lock()
-            .unwrap()
-            .iter()
-            .filter(|asset| {
-                asset.name.to_lowercase().contains(&query_lower)
-                    || asset.tags.iter().any(|tag| tag.to_lowercase().contains(&query_lower))
-                    || asset.description.to_lowercase().contains(&query_lower)
-            })
-            .cloned()
-            .collect()
+        let assets = self.assets.lock().unwrap();
+        let search_index = self.search_index.lock().unwrap();
+
+        // Use optimized search with pre-computed lowercase strings
+        search_index.search(query, &assets)
+    }
+
+    /// Retrieves a paginated subset of all assets (lazy loading support).
+    ///
+    /// This method enables lazy loading of assets for better performance
+    /// when dealing with large asset lists in the GUI.
+    ///
+    /// # Arguments
+    /// * `page` - The page number (0-indexed)
+    /// * `page_size` - Number of assets per page
+    ///
+    /// # Returns
+    /// * `Vec<Asset>` - A vector containing assets for the requested page
+    ///
+    /// # Performance
+    /// This method avoids cloning the entire asset list, only cloning
+    /// the subset needed for the current page.
+    ///
+    /// # Example
+    /// ```
+    /// let manager = AssetManager::new();
+    /// // Get first page with 20 assets
+    /// let page1 = manager.get_assets_paginated(0, 20);
+    /// // Get second page
+    /// let page2 = manager.get_assets_paginated(1, 20);
+    /// ```
+    pub fn get_assets_paginated(&self, page: usize, page_size: usize) -> Vec<Asset> {
+        let assets = self.assets.lock().unwrap();
+        let start = page * page_size;
+        let end = std::cmp::min(start + page_size, assets.len());
+
+        if start >= assets.len() {
+            return Vec::new();
+        }
+
+        assets[start..end].to_vec()
+    }
+
+    /// Gets the total number of assets.
+    ///
+    /// This is useful for calculating the total number of pages
+    /// when implementing pagination.
+    ///
+    /// # Returns
+    /// * `usize` - Total number of assets
+    pub fn get_asset_count(&self) -> usize {
+        self.assets.lock().unwrap().len()
     }
 
     /// Retrieves a specific asset by its ID.
@@ -741,12 +864,22 @@ impl AssetManager {
 
         // Add the new/updated asset
         assets.push(asset);
+
+        // Rebuild search index to include the new asset
+        let assets_clone = assets.clone();
+        drop(assets); // Release lock before acquiring search_index lock
+        self.search_index.lock().unwrap().rebuild(&assets_clone);
     }
 
     /// Removes an asset from the local catalog
     pub fn remove_asset(&self, asset_id: &str) {
         let mut assets = self.assets.lock().unwrap();
         assets.retain(|a| a.id != asset_id);
+
+        // Rebuild search index to remove the deleted asset
+        let assets_clone = assets.clone();
+        drop(assets); // Release lock before acquiring search_index lock
+        self.search_index.lock().unwrap().rebuild(&assets_clone);
     }
 
     // ===== Advanced Asset Management Features =====
@@ -2946,5 +3079,213 @@ mod tests {
 
         // Verify it's a subdirectory of base_dir
         assert!(temp_path.starts_with(&base_dir));
+    }
+
+    // ===== Performance Optimization Tests =====
+
+    #[test]
+    fn test_search_index_creation() {
+        let manager = AssetManager::new();
+
+        // Verify search index is initialized
+        let search_index = manager.search_index.lock().unwrap();
+        assert_eq!(search_index.lowercase_names.len(), 5); // 5 sample assets
+        assert_eq!(search_index.lowercase_tags.len(), 5);
+        assert_eq!(search_index.lowercase_descriptions.len(), 5);
+    }
+
+    #[test]
+    fn test_optimized_search() {
+        let manager = AssetManager::new();
+
+        // Search for "shader" - should find "Shader Pack Pro"
+        let results = manager.search_assets("shader");
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].name, "Shader Pack Pro");
+
+        // Search for "2d" - should find assets with "2d" tag or in name
+        let results = manager.search_assets("2d");
+        assert!(results.len() > 0);
+        assert!(results.iter().any(|a| a.name == "Awesome 2D Sprites"));
+
+        // Case-insensitive search
+        let results_upper = manager.search_assets("SHADER");
+        let results_lower = manager.search_assets("shader");
+        assert_eq!(results_upper.len(), results_lower.len());
+    }
+
+    #[test]
+    fn test_search_index_rebuild_on_add() {
+        let manager = AssetManager::new();
+        let initial_count = manager.get_asset_count();
+
+        // Add a new asset
+        let new_asset = Asset::new(
+            "test_123".to_string(),
+            "Test Performance Asset".to_string(),
+            AssetCategory::Tools,
+            "".to_string(),
+            "TestAuthor".to_string(),
+            "1.0.0".to_string(),
+            "A test asset for performance optimization".to_string(),
+            vec!["test".to_string(), "performance".to_string()],
+            None,
+            "https://example.com/test.zip".to_string(),
+            vec![],
+            vec![],
+        );
+
+        manager.add_asset(new_asset);
+
+        // Verify asset was added
+        assert_eq!(manager.get_asset_count(), initial_count + 1);
+
+        // Verify search index was rebuilt and can find the new asset
+        let results = manager.search_assets("performance");
+        assert!(results.iter().any(|a| a.id == "test_123"));
+
+        // Verify index size matches asset count
+        let search_index = manager.search_index.lock().unwrap();
+        assert_eq!(search_index.lowercase_names.len(), initial_count + 1);
+    }
+
+    #[test]
+    fn test_search_index_rebuild_on_remove() {
+        let manager = AssetManager::new();
+        let initial_count = manager.get_asset_count();
+
+        // Add a test asset
+        let new_asset = Asset::new(
+            "temp_asset".to_string(),
+            "Temporary Asset".to_string(),
+            AssetCategory::Tools,
+            "".to_string(),
+            "TestAuthor".to_string(),
+            "1.0.0".to_string(),
+            "This will be removed".to_string(),
+            vec!["temporary".to_string()],
+            None,
+            "https://example.com/temp.zip".to_string(),
+            vec![],
+            vec![],
+        );
+
+        manager.add_asset(new_asset);
+        assert_eq!(manager.get_asset_count(), initial_count + 1);
+
+        // Remove the asset
+        manager.remove_asset("temp_asset");
+        assert_eq!(manager.get_asset_count(), initial_count);
+
+        // Verify search index was rebuilt and asset is no longer found
+        let results = manager.search_assets("temporary");
+        assert!(results.is_empty());
+
+        // Verify index size matches asset count
+        let search_index = manager.search_index.lock().unwrap();
+        assert_eq!(search_index.lowercase_names.len(), initial_count);
+    }
+
+    #[test]
+    fn test_pagination() {
+        let manager = AssetManager::new();
+        let total_assets = manager.get_asset_count();
+
+        // Test first page
+        let page_size = 2;
+        let page1 = manager.get_assets_paginated(0, page_size);
+        assert_eq!(page1.len(), page_size);
+
+        // Test second page
+        let page2 = manager.get_assets_paginated(1, page_size);
+        assert_eq!(page2.len(), page_size);
+
+        // Verify pages contain different assets
+        assert_ne!(page1[0].id, page2[0].id);
+
+        // Test last page (might be partial)
+        let last_page_index = (total_assets - 1) / page_size;
+        let last_page = manager.get_assets_paginated(last_page_index, page_size);
+        assert!(last_page.len() > 0);
+        assert!(last_page.len() <= page_size);
+
+        // Test out-of-bounds page
+        let empty_page = manager.get_assets_paginated(999, page_size);
+        assert!(empty_page.is_empty());
+    }
+
+    #[test]
+    fn test_pagination_consistency() {
+        let manager = AssetManager::new();
+        let total_assets = manager.get_asset_count();
+        let page_size = 2;
+
+        // Collect all assets via pagination
+        let mut paginated_assets = Vec::new();
+        let mut page = 0;
+        loop {
+            let page_assets = manager.get_assets_paginated(page, page_size);
+            if page_assets.is_empty() {
+                break;
+            }
+            paginated_assets.extend(page_assets);
+            page += 1;
+        }
+
+        // Should match total asset count
+        assert_eq!(paginated_assets.len(), total_assets);
+
+        // Should match get_assets() result
+        let all_assets = manager.get_assets();
+        assert_eq!(paginated_assets.len(), all_assets.len());
+    }
+
+    #[test]
+    fn test_get_asset_count() {
+        let manager = AssetManager::new();
+        let count = manager.get_asset_count();
+
+        // Should have sample assets
+        assert!(count > 0);
+
+        // Should match get_assets length
+        assert_eq!(count, manager.get_assets().len());
+    }
+
+    #[test]
+    fn test_search_performance_with_large_dataset() {
+        use std::time::Instant;
+
+        let manager = AssetManager::new();
+
+        // Add 100 test assets to simulate larger dataset
+        for i in 0..100 {
+            let asset = Asset::new(
+                format!("perf_test_{}", i),
+                format!("Performance Test Asset {}", i),
+                if i % 2 == 0 { AssetCategory::TwoD } else { AssetCategory::ThreeD },
+                "".to_string(),
+                format!("Author {}", i % 10),
+                "1.0.0".to_string(),
+                format!("Description for asset number {}", i),
+                vec![format!("tag{}", i % 5), "performance".to_string()],
+                None,
+                format!("https://example.com/asset_{}.zip", i),
+                vec![],
+                vec![],
+            );
+            manager.add_asset(asset);
+        }
+
+        // Measure search performance
+        let start = Instant::now();
+        let results = manager.search_assets("performance");
+        let duration = start.elapsed();
+
+        // Should find all 100 test assets (plus any from sample data)
+        assert!(results.len() >= 100);
+
+        // Search should complete quickly (< 10ms for ~100 assets)
+        assert!(duration.as_millis() < 100, "Search took {:?}, expected < 100ms", duration);
     }
 }

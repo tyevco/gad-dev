@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [lib]
-crate-type = ["cdylib"]
+crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 godot = { git = "https://github.com/godot-rust/gdext", branch = "master" }
@@ -19,6 +19,11 @@ futures-util = "0.3"
 
 [dev-dependencies]
 tempfile = "3.10"
+criterion = { version = "0.5", features = ["html_reports"] }
 
 [build-dependencies]
 # Add any build dependencies here if needed
+
+[[bench]]
+name = "asset_loading"
+harness = false
